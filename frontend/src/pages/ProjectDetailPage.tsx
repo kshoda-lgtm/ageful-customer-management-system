@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import Layout from '../components/Layout';
 import api from '../lib/api';
-import { Loader2, Save, ArrowLeft, Zap, FileText, Info, MapPin, Wrench, Plus, DollarSign, Trash2, Edit2 } from 'lucide-react';
+import { Loader2, Save, ArrowLeft, Zap, FileText, Info, MapPin, Wrench, Plus, DollarSign } from 'lucide-react';
 import type { Project, PowerPlantSpec, RegulatoryInfo, MaintenanceLog, Contract, Invoice } from '../types';
 
 export default function ProjectDetailPage() {
