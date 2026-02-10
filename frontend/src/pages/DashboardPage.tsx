@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import api from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 import { Loader2, Search, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -17,8 +17,53 @@ export default function DashboardPage() {
             try {
                 const year = currentDate.getFullYear();
                 const month = currentDate.getMonth() + 1;
-                const res = await api.get(`/dashboard/billing-summary?year=${year}&month=${month}`);
-                setData(res.data.data);
+
+                // Fetch invoices for this month with related data
+                const billingMonth = `${year}-${String(month).padStart(2, '0')}`;
+
+                const { data: invoices, error } = await supabase
+                    .from('invoices')
+                    .select(`
+                        id,
+                        amount,
+                        status,
+                        billing_period,
+                        issue_date,
+                        contract_id,
+                        contracts (
+                            id,
+                            project_id,
+                            projects (
+                                id,
+                                project_name,
+                                customer_id,
+                                customers (
+                                    id,
+                                    contact_name,
+                                    company_name
+                                )
+                            )
+                        )
+                    `)
+                    .eq('billing_period', billingMonth)
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+
+                // Transform data for display
+                const transformed = (invoices || []).map((inv: any) => ({
+                    invoice_id: inv.id,
+                    amount: inv.amount || 0,
+                    invoice_status: inv.status,
+                    billing_date: inv.billing_period,
+                    project_id: inv.contracts?.project_id,
+                    project_name: inv.contracts?.projects?.project_name || '不明',
+                    customer_id: inv.contracts?.projects?.customer_id,
+                    customer_name: inv.contracts?.projects?.customers?.company_name ||
+                        inv.contracts?.projects?.customers?.contact_name || '不明',
+                }));
+
+                setData(transformed);
             } catch (err) {
                 console.error(err);
             } finally {
@@ -35,6 +80,11 @@ export default function DashboardPage() {
     const handleNextMonth = () => {
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
     };
+
+    const totalAmount = data.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const billedCount = data.filter(d => d.invoice_status === 'billed' || d.invoice_status === 'paid').length;
+    const paidCount = data.filter(d => d.invoice_status === 'paid').length;
+    const paidPercent = data.length > 0 ? Math.round((paidCount / data.length) * 100) : 0;
 
     return (
         <Layout>
@@ -62,19 +112,19 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Stats Cards (Placeholders) */}
+                {/* Stats Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="bg-white p-6 rounded-xl border shadow-sm">
                         <p className="text-sm text-gray-500 font-medium">請求総額 (予定)</p>
-                        <p className="text-3xl font-bold mt-2 text-slate-900">¥0</p>
+                        <p className="text-3xl font-bold mt-2 text-slate-900">¥{totalAmount.toLocaleString()}</p>
                     </div>
                     <div className="bg-white p-6 rounded-xl border shadow-sm">
                         <p className="text-sm text-gray-500 font-medium">請求済み</p>
-                        <p className="text-3xl font-bold mt-2 text-blue-600">0件</p>
+                        <p className="text-3xl font-bold mt-2 text-blue-600">{billedCount}件</p>
                     </div>
                     <div className="bg-white p-6 rounded-xl border shadow-sm">
                         <p className="text-sm text-gray-500 font-medium">入金完了</p>
-                        <p className="text-3xl font-bold mt-2 text-green-600">0%</p>
+                        <p className="text-3xl font-bold mt-2 text-green-600">{paidPercent}%</p>
                     </div>
                 </div>
 

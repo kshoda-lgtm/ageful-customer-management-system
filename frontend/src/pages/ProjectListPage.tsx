@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import api from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { Search, Loader2, Zap, MapPin } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Project } from '../types';
@@ -13,8 +13,22 @@ export default function ProjectListPage() {
     const fetchProjects = async (searchTerm = '') => {
         setLoading(true);
         try {
-            const res = await api.get(`/projects?search=${searchTerm}`);
-            setProjects(res.data);
+            let query = supabase
+                .from('projects')
+                .select('*, customers(contact_name, company_name)')
+                .order('created_at', { ascending: false });
+            if (searchTerm) {
+                query = query.or(`project_name.ilike.%${searchTerm}%,project_number.ilike.%${searchTerm}%`);
+            }
+            const { data, error } = await query;
+            if (error) throw error;
+            // Flatten customer data
+            const flat = (data || []).map((p: any) => ({
+                ...p,
+                contact_name: p.customers?.contact_name,
+                company_name: p.customers?.company_name,
+            }));
+            setProjects(flat);
         } catch (err) {
             console.error(err);
         } finally {

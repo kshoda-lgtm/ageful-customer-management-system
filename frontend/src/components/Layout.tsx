@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, LogOut, Sun, Briefcase, Wrench } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Briefcase, Wrench } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -18,10 +18,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="min-h-screen flex bg-gray-50">
             {/* Sidebar */}
             <aside className="w-64 bg-slate-900 text-white fixed h-full hidden md:flex flex-col">
-                <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-                    <Sun className="w-6 h-6 text-yellow-500" />
-                    <span className="font-bold text-lg tracking-tight">Ageful Solar</span>
-                </div>
+                <Link to="/" className="p-6 border-b border-slate-800 flex items-center gap-3 hover:bg-slate-800/50 transition-colors">
+                    {/* <Sun className="w-6 h-6 text-yellow-500" /> */}
+                    <img src="/logo.png" alt="Ageful Solar" className="h-8 w-auto object-contain" />
+                    {/* <span className="font-bold text-lg tracking-tight">Ageful Solar</span> */}
+                </Link>
 
                 <nav className="flex-1 p-4 space-y-2">
                     {navItems.map((item) => {

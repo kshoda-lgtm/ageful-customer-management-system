@@ -1,60 +1,53 @@
 # Ageful Customer Management System
 
-エイジフル顧客管理システム - クライアント向け顧客管理ソリューション
+Supabaseを活用したサーバーレス構成の顧客管理システム。
 
-## プロジェクト構成
+## 概要
 
-```
-ageful.customer-management-system/
-├── frontend/          # React + Vite フロントエンド
-├── backend/           # Node.js + Express バックエンド
-├── database/          # PostgreSQL スキーマ・マイグレーション
-└── README.md
-```
+以前はExpressバックエンドを使用していましたが、現在は **Supabase直接接続** に移行しました。
+これにより、バックエンドサーバーのデプロイ（Render等）は不要となり、フロントエンド（Vercel）のみで動作します。
 
-## 技術スタック
+## 構成
 
-- **フロントエンド**: React 18 + Vite + TypeScript
-- **バックエンド**: Node.js + Express + TypeScript
-- **データベース**: PostgreSQL
-- **認証**: JWT (JSON Web Token)
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS 4
+- **Database**: Supabase (PostgreSQL)
+- **Deployment**: Vercel (Frontend only)
 
-## セットアップ
+## ローカル開発環境のセットアップ
 
-### 必要条件
+1. **依存関係のインストール**
+   ```bash
+   cd frontend
+   npm install
+   ```
 
-- Node.js 18+
-- PostgreSQL 14+
-- npm または yarn
+2. **環境変数の設定**
+   `frontend` ディレクトリに `.env` ファイルを作成済みです。
+   ```properties
+   VITE_SUPABASE_URL=https://iurnhgpuabzwjhstbxdy.supabase.co
+   VITE_SUPABASE_ANON_KEY=your_anon_key_here
+   ```
 
-### インストール
+3. **開発サーバーの起動**
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+   http://localhost:5173 にアクセスしてください。
 
-```bash
-# バックエンドのセットアップ
-cd backend
-npm install
+4. **データベースのセットアップ**
+   まだ行っていなければ、SupabaseのSQLエディタで `database/supabase_schema.sql` の内容を実行してテーブルとRLSポリシーを作成してください。
 
-# フロントエンドのセットアップ
-cd frontend
-npm install
-```
+## デプロイ方法 (Vercel)
 
-### 環境変数
+1. Vercelで「Add New Project」
+2. `frontend` ディレクトリをRoot Directoryに指定
+3. Environment Variablesを設定:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+4. Deploy
 
-`.env.example` を `.env` にコピーして、必要な環境変数を設定してください。
-
-## 開発
-
-```bash
-# バックエンド起動
-cd backend
-npm run dev
-
-# フロントエンド起動
-cd frontend
-npm run dev
-```
-
-## ライセンス
-
-Proprietary - Ageful Inc.
+## ディレクトリ構成
+- `frontend/`: メインのアプリケーションコード
+- `backend/`: (旧) Expressサーバー。現在は参照用。使用しません。
+- `database/`: SQLスキーマファイル

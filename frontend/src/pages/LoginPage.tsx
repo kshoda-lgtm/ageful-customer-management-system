@@ -3,7 +3,6 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../context/AuthContext';
-import api from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 
@@ -28,20 +27,14 @@ export default function LoginPage() {
         setIsLoading(true);
         setError('');
         try {
-            // In a real app we would call login API
-            // For first run, if we don't have users, we might need a register link or auto-create seed
-            // For now assume API works
-            const res = await api.post('/auth/login', data);
-            login(res.data.token, res.data.user);
-            navigate('/');
-        } catch (err: any) {
-            if (err.response?.status === 401) {
-                setError('メールアドレスまたはパスワードが間違っています。');
+            const result = await login(data.email, data.password);
+            if (result.success) {
+                navigate('/');
             } else {
-                setError('ログインに失敗しました。サーバーエラーの可能性があります。');
-                // Fallback hack for demo if backend is empty: Register implicitly? No, bad practice.
-                // We will register a user via seed or manual curl if needed. 
+                setError(result.error || 'ログインに失敗しました');
             }
+        } catch {
+            setError('ログインに失敗しました。');
         } finally {
             setIsLoading(false);
         }
@@ -50,8 +43,9 @@ export default function LoginPage() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50">
             <div className="max-w-md w-full p-8 bg-white rounded-xl shadow-lg border border-gray-100">
-                <div className="text-center mb-8">
-                    <h1 className="text-2xl font-bold text-gray-900">Ageful 顧客管理システム</h1>
+                <div className="text-center mb-8 flex flex-col items-center">
+                    <img src="/logo.png" alt="Ageful Solar" className="h-12 w-auto object-contain mb-4" />
+                    {/* <h1 className="text-2xl font-bold text-gray-900">Ageful 顧客管理システム</h1> */}
                     <p className="text-sm text-gray-500 mt-2">ログインして管理画面へアクセス</p>
                 </div>
 
@@ -93,7 +87,6 @@ export default function LoginPage() {
                     </button>
                 </form>
 
-                {/* Helper for demo: How to create first user? */}
                 <div className="mt-4 text-center">
                     <p className="text-xs text-gray-400">
                         初期ユーザー登録は管理者のみ可能です

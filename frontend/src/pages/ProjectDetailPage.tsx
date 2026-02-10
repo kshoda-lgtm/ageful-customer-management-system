@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import Layout from '../components/Layout';
-import api from '../lib/api';
+import MaintenanceLogModal, { type MaintenanceLogFormData } from '../components/MaintenanceLogModal';
+import ContractModal, { type ContractFormData } from '../components/ContractModal';
+import InvoiceModal, { type InvoiceFormData } from '../components/InvoiceModal';
+import { supabase } from '../lib/supabase';
 import { Loader2, Save, ArrowLeft, Zap, FileText, Info, MapPin, Wrench, Plus, DollarSign } from 'lucide-react';
 import type { Project, PowerPlantSpec, RegulatoryInfo, MaintenanceLog, Contract, Invoice } from '../types';
 
@@ -14,6 +17,10 @@ export default function ProjectDetailPage() {
     const [activeTab, setActiveTab] = useState<'basic' | 'specs' | 'regulatory' | 'maintenance' | 'contracts'>('basic');
     const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
     const [contracts, setContracts] = useState<Contract[]>([]);
+    const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
+    const [showContractModal, setShowContractModal] = useState(false);
+    const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+    const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
 
     const { register, handleSubmit, reset, watch } = useForm<Project & {
         power_plant_specs: PowerPlantSpec;
@@ -29,25 +36,59 @@ export default function ProjectDetailPage() {
 
         const fetchData = async () => {
             try {
-                const projRes = await api.get(`/projects/${id}`);
-                reset(projRes.data);
+                // Fetch project with specs and regulatory info
+                const { data: project, error } = await supabase
+                    .from('projects')
+                    .select('*')
+                    .eq('id', id)
+                    .single();
+                if (error) throw error;
+
+                // Fetch power plant specs
+                const { data: specs } = await supabase
+                    .from('power_plant_specs')
+                    .select('*')
+                    .eq('project_id', id)
+                    .single();
+
+                // Fetch regulatory info
+                const { data: regulatory } = await supabase
+                    .from('regulatory_info')
+                    .select('*')
+                    .eq('project_id', id)
+                    .single();
+
+                reset({
+                    ...project,
+                    power_plant_specs: specs || {},
+                    regulatory_info: regulatory || {},
+                });
             } catch (err) {
                 console.error('Failed to fetch project:', err);
                 navigate('/');
                 return;
             }
 
-            // These can fail without blocking the page
+            // Fetch maintenance logs
             try {
-                const logsRes = await api.get(`/projects/${id}/maintenance`);
-                setMaintenanceLogs(logsRes.data || []);
+                const { data } = await supabase
+                    .from('maintenance_logs')
+                    .select('*')
+                    .eq('project_id', id)
+                    .order('occurrence_date', { ascending: false });
+                setMaintenanceLogs(data || []);
             } catch (err) {
                 console.error('Failed to fetch maintenance logs:', err);
             }
 
+            // Fetch contracts with invoices
             try {
-                const contractsRes = await api.get(`/contracts/project/${id}`);
-                setContracts(contractsRes.data || []);
+                const { data } = await supabase
+                    .from('contracts')
+                    .select('*, invoices(*)')
+                    .eq('project_id', id)
+                    .order('created_at', { ascending: false });
+                setContracts(data || []);
             } catch (err) {
                 console.error('Failed to fetch contracts:', err);
             }
@@ -60,7 +101,28 @@ export default function ProjectDetailPage() {
     const onSubmit = async (data: any) => {
         setIsSaving(true);
         try {
-            await api.put(`/projects/${id}`, data);
+            // Update project basic info
+            const { power_plant_specs, regulatory_info, ...projectData } = data;
+            const { error } = await supabase
+                .from('projects')
+                .update(projectData)
+                .eq('id', id);
+            if (error) throw error;
+
+            // Upsert power plant specs if present
+            if (power_plant_specs && Object.keys(power_plant_specs).length > 0) {
+                await supabase
+                    .from('power_plant_specs')
+                    .upsert({ ...power_plant_specs, project_id: id }, { onConflict: 'project_id' });
+            }
+
+            // Upsert regulatory info if present
+            if (regulatory_info && Object.keys(regulatory_info).length > 0) {
+                await supabase
+                    .from('regulatory_info')
+                    .upsert({ ...regulatory_info, project_id: id }, { onConflict: 'project_id' });
+            }
+
             alert('保存しました');
         } catch (err) {
             console.error(err);
@@ -70,85 +132,80 @@ export default function ProjectDetailPage() {
         }
     };
 
-    const handleMaintenanceSubmit = async () => {
-        const date = prompt('発生日 (YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
-        if (!date) return;
-        const type = prompt('作業種別 (例: 除草、点検)');
-        const content = prompt('対応内容');
+    const handleMaintenanceSubmit = async (formData: MaintenanceLogFormData) => {
+        const { error } = await supabase.from('maintenance_logs').insert({
+            project_id: id,
+            occurrence_date: formData.occurrence_date,
+            inquiry_date: formData.inquiry_date || null,
+            work_type: formData.work_type,
+            target_area: formData.target_area || null,
+            situation: formData.situation || null,
+            response: formData.response,
+            report: formData.report || null,
+            status: formData.status,
+        });
+        if (error) throw error;
 
-        if (date && type && content) {
-            try {
-                await api.post('/maintenance', {
-                    project_id: id,
-                    occurrence_date: date,
-                    work_type: type,
-                    target_area: '全域',
-                    situation: '定期メンテ',
-                    response: content,
-                    status: 'completed'
-                });
-                const logsRes = await api.get(`/projects/${id}/maintenance`);
-                setMaintenanceLogs(logsRes.data);
-                alert('追加しました');
-            } catch (err) {
-                console.error(err);
-                alert('追加に失敗しました');
-            }
-        }
+        const { data } = await supabase
+            .from('maintenance_logs')
+            .select('*')
+            .eq('project_id', id)
+            .order('occurrence_date', { ascending: false });
+        setMaintenanceLogs(data || []);
     };
 
-    const handleContractSubmit = async () => {
-        const startDate = prompt('契約開始日 (YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
-        if (!startDate) return;
-        const fee = prompt('年間保守料（税抜）', '0');
-        const landRent = prompt('土地賃料', '0');
-        const commFee = prompt('通信料', '0');
-
-        try {
-            await api.post('/contracts', {
-                project_id: id,
-                contract_type: 'maintenance',
-                start_date: startDate,
-                annual_maintenance_fee: parseFloat(fee || '0'),
-                land_rent: parseFloat(landRent || '0'),
-                communication_fee: parseFloat(commFee || '0')
-            });
-            const contractsRes = await api.get(`/contracts/project/${id}`);
-            setContracts(contractsRes.data);
-            alert('契約を追加しました');
-        } catch (err) {
-            console.error(err);
-            alert('追加に失敗しました');
-        }
+    const refreshContracts = async () => {
+        const { data } = await supabase
+            .from('contracts')
+            .select('*, invoices(*)')
+            .eq('project_id', id)
+            .order('created_at', { ascending: false });
+        setContracts(data || []);
     };
 
-    const handleInvoiceSubmit = async (contractId: number) => {
-        const month = prompt('請求対象年月 (YYYY-MM)', new Date().toISOString().slice(0, 7));
-        if (!month) return;
-        const amount = prompt('請求金額', '0');
+    const handleContractSubmit = async (formData: ContractFormData) => {
+        const { error } = await supabase.from('contracts').insert({
+            project_id: id,
+            contract_type: formData.contract_type,
+            start_date: formData.start_date,
+            end_date: formData.end_date || null,
+            business_owner: formData.business_owner || null,
+            contractor: formData.contractor || null,
+            subcontractor: formData.subcontractor || null,
+            annual_maintenance_fee: parseFloat(formData.annual_maintenance_fee || '0'),
+            land_rent: parseFloat(formData.land_rent || '0'),
+            communication_fee: parseFloat(formData.communication_fee || '0'),
+        });
+        if (error) throw error;
+        await refreshContracts();
+    };
 
-        try {
-            await api.post('/contracts/invoices', {
-                contract_id: contractId,
-                billing_period: month,
-                issue_date: new Date().toISOString().split('T')[0],
-                amount: parseFloat(amount || '0'),
-                status: 'unbilled'
-            });
-            const contractsRes = await api.get(`/contracts/project/${id}`);
-            setContracts(contractsRes.data);
-            alert('請求書を追加しました');
-        } catch (err) {
-            console.error(err);
-            alert('追加に失敗しました');
-        }
+    const handleInvoiceSubmit = async (formData: InvoiceFormData) => {
+        if (!selectedContractId) return;
+        const { error } = await supabase.from('invoices').insert({
+            contract_id: selectedContractId,
+            billing_period: formData.billing_period,
+            issue_date: new Date().toISOString().split('T')[0],
+            amount: parseFloat(formData.amount || '0'),
+            status: formData.status,
+            payment_due_date: formData.payment_due_date || null,
+        });
+        if (error) throw error;
+        await refreshContracts();
     };
 
     const handleInvoiceStatusChange = async (invoiceId: number, newStatus: string) => {
         try {
-            await api.patch(`/contracts/invoices/${invoiceId}/status`, { status: newStatus });
-            const contractsRes = await api.get(`/contracts/project/${id}`);
-            setContracts(contractsRes.data);
+            await supabase
+                .from('invoices')
+                .update({ status: newStatus })
+                .eq('id', invoiceId);
+            const { data } = await supabase
+                .from('contracts')
+                .select('*, invoices(*)')
+                .eq('project_id', id)
+                .order('created_at', { ascending: false });
+            setContracts(data || []);
         } catch (err) {
             console.error(err);
             alert('ステータス更新に失敗しました');
@@ -383,7 +440,7 @@ export default function ProjectDetailPage() {
                                 <h2 className="text-lg font-bold text-gray-800">メンテナンス履歴</h2>
                                 <button
                                     type="button"
-                                    onClick={handleMaintenanceSubmit}
+                                    onClick={() => setShowMaintenanceModal(true)}
                                     className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1"
                                 >
                                     <Plus className="w-4 h-4" />
@@ -433,7 +490,7 @@ export default function ProjectDetailPage() {
                                 <h2 className="text-lg font-bold text-gray-800">契約・請求管理</h2>
                                 <button
                                     type="button"
-                                    onClick={handleContractSubmit}
+                                    onClick={() => setShowContractModal(true)}
                                     className="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 flex items-center gap-1"
                                 >
                                     <Plus className="w-4 h-4" />
@@ -459,7 +516,7 @@ export default function ProjectDetailPage() {
                                         </div>
                                         <button
                                             type="button"
-                                            onClick={() => handleInvoiceSubmit(contract.id)}
+                                            onClick={() => { setSelectedContractId(contract.id); setShowInvoiceModal(true); }}
                                             className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 flex items-center gap-1"
                                         >
                                             <Plus className="w-3 h-3" />
@@ -515,6 +572,22 @@ export default function ProjectDetailPage() {
                     </div>
                 </div>
             </div>
+
+            <MaintenanceLogModal
+                isOpen={showMaintenanceModal}
+                onClose={() => setShowMaintenanceModal(false)}
+                onSubmit={handleMaintenanceSubmit}
+            />
+            <ContractModal
+                isOpen={showContractModal}
+                onClose={() => setShowContractModal(false)}
+                onSubmit={handleContractSubmit}
+            />
+            <InvoiceModal
+                isOpen={showInvoiceModal}
+                onClose={() => { setShowInvoiceModal(false); setSelectedContractId(null); }}
+                onSubmit={handleInvoiceSubmit}
+            />
         </Layout>
     );
 }

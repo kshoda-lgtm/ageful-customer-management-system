@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import api from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { Search, Plus, User, MapPin, Phone } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
@@ -18,13 +18,17 @@ export default function CustomerListPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
-    // Debounce logic can be added, for now fetch on effect change with simple delay or submit
 
     const fetchCustomers = async (searchTerm = '') => {
         setLoading(true);
         try {
-            const res = await api.get(`/customers?search=${searchTerm}`);
-            setCustomers(res.data);
+            let query = supabase.from('customers').select('*').order('created_at', { ascending: false });
+            if (searchTerm) {
+                query = query.or(`contact_name.ilike.%${searchTerm}%,company_name.ilike.%${searchTerm}%`);
+            }
+            const { data, error } = await query;
+            if (error) throw error;
+            setCustomers(data || []);
         } catch (err) {
             console.error(err);
         } finally {
