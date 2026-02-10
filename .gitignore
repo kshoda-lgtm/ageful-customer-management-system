@@ -9,10 +9,16 @@ build/
 .env
 .env.local
 .env.production
+backend/.env
 
 # Credentials
 google-credentials.json
 *.json.bak
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
 
 # IDE
 .vscode/
