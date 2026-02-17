@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
-import bcryptjs from 'bcryptjs';
+import { apiLogin } from '../lib/api';
 
 interface User {
     id: number;
@@ -23,7 +22,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Check if user is stored in localStorage
         const storedUser = localStorage.getItem('ageful_user');
         if (storedUser) {
             try {
@@ -37,32 +35,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const login = async (email: string, password: string) => {
         try {
-            // Fetch user from Supabase users table
-            const { data: userData, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('email', email)
-                .single();
+            const result = await apiLogin(email, password);
 
-            if (error || !userData) {
-                return { success: false, error: 'ユーザーが見つかりません' };
+            if (!result.success) {
+                return { success: false, error: result.error || 'ログインに失敗しました' };
             }
 
-            // Verify password
-            const isValid = await bcryptjs.compare(password, userData.password_hash);
-            if (!isValid) {
-                return { success: false, error: 'パスワードが間違っています' };
-            }
-
-            const user: User = {
-                id: userData.id,
-                email: userData.email,
-                name: userData.name,
-                role: userData.role,
+            const loggedInUser: User = {
+                id: result.user.id,
+                email: result.user.email,
+                name: result.user.name,
+                role: result.user.role,
             };
 
-            setUser(user);
-            localStorage.setItem('ageful_user', JSON.stringify(user));
+            setUser(loggedInUser);
+            localStorage.setItem('ageful_user', JSON.stringify(loggedInUser));
             return { success: true };
         } catch (err) {
             console.error('Login error:', err);

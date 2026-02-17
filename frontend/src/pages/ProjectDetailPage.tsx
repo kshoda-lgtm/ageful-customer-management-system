@@ -5,7 +5,7 @@ import Layout from '../components/Layout';
 import MaintenanceLogModal, { type MaintenanceLogFormData } from '../components/MaintenanceLogModal';
 import ContractModal, { type ContractFormData } from '../components/ContractModal';
 import InvoiceModal, { type InvoiceFormData } from '../components/InvoiceModal';
-import { supabase } from '../lib/supabase';
+import { apiGetProject, apiUpdateProject, apiUpdatePowerPlantSpecs, apiUpdateRegulatoryInfo, apiCreateMaintenanceLog, apiGetMaintenanceLogs, apiGetContracts, apiCreateContract, apiCreateInvoice, apiUpdateInvoiceStatus } from '../lib/api';
 import { Loader2, Save, ArrowLeft, Zap, FileText, Info, MapPin, Wrench, Plus, DollarSign } from 'lucide-react';
 import type { Project, PowerPlantSpec, RegulatoryInfo, MaintenanceLog, Contract, Invoice } from '../types';
 
@@ -36,61 +36,21 @@ export default function ProjectDetailPage() {
 
         const fetchData = async () => {
             try {
-                // Fetch project with specs and regulatory info
-                const { data: project, error } = await supabase
-                    .from('projects')
-                    .select('*')
-                    .eq('id', id)
-                    .single();
-                if (error) throw error;
-
-                // Fetch power plant specs
-                const { data: specs } = await supabase
-                    .from('power_plant_specs')
-                    .select('*')
-                    .eq('project_id', id)
-                    .single();
-
-                // Fetch regulatory info
-                const { data: regulatory } = await supabase
-                    .from('regulatory_info')
-                    .select('*')
-                    .eq('project_id', id)
-                    .single();
+                const project = await apiGetProject(id!);
+                if (project.error) throw new Error(project.error);
 
                 reset({
                     ...project,
-                    power_plant_specs: specs || {},
-                    regulatory_info: regulatory || {},
+                    power_plant_specs: project.power_plant_specs || {},
+                    regulatory_info: project.regulatory_info || {},
                 });
+
+                setMaintenanceLogs(project.maintenance_logs || []);
+                setContracts(project.contracts || []);
             } catch (err) {
                 console.error('Failed to fetch project:', err);
                 navigate('/');
                 return;
-            }
-
-            // Fetch maintenance logs
-            try {
-                const { data } = await supabase
-                    .from('maintenance_logs')
-                    .select('*')
-                    .eq('project_id', id)
-                    .order('occurrence_date', { ascending: false });
-                setMaintenanceLogs(data || []);
-            } catch (err) {
-                console.error('Failed to fetch maintenance logs:', err);
-            }
-
-            // Fetch contracts with invoices
-            try {
-                const { data } = await supabase
-                    .from('contracts')
-                    .select('*, invoices(*)')
-                    .eq('project_id', id)
-                    .order('created_at', { ascending: false });
-                setContracts(data || []);
-            } catch (err) {
-                console.error('Failed to fetch contracts:', err);
             }
 
             setLoading(false);
@@ -101,26 +61,15 @@ export default function ProjectDetailPage() {
     const onSubmit = async (data: any) => {
         setIsSaving(true);
         try {
-            // Update project basic info
             const { power_plant_specs, regulatory_info, ...projectData } = data;
-            const { error } = await supabase
-                .from('projects')
-                .update(projectData)
-                .eq('id', id);
-            if (error) throw error;
+            await apiUpdateProject(id!, projectData);
 
-            // Upsert power plant specs if present
             if (power_plant_specs && Object.keys(power_plant_specs).length > 0) {
-                await supabase
-                    .from('power_plant_specs')
-                    .upsert({ ...power_plant_specs, project_id: id }, { onConflict: 'project_id' });
+                await apiUpdatePowerPlantSpecs(id!, power_plant_specs);
             }
 
-            // Upsert regulatory info if present
             if (regulatory_info && Object.keys(regulatory_info).length > 0) {
-                await supabase
-                    .from('regulatory_info')
-                    .upsert({ ...regulatory_info, project_id: id }, { onConflict: 'project_id' });
+                await apiUpdateRegulatoryInfo(id!, regulatory_info);
             }
 
             alert('保存しました');
@@ -133,7 +82,7 @@ export default function ProjectDetailPage() {
     };
 
     const handleMaintenanceSubmit = async (formData: MaintenanceLogFormData) => {
-        const { error } = await supabase.from('maintenance_logs').insert({
+        const result = await apiCreateMaintenanceLog({
             project_id: id,
             occurrence_date: formData.occurrence_date,
             inquiry_date: formData.inquiry_date || null,
@@ -144,27 +93,19 @@ export default function ProjectDetailPage() {
             report: formData.report || null,
             status: formData.status,
         });
-        if (error) throw error;
+        if (result.error) throw new Error(result.error);
 
-        const { data } = await supabase
-            .from('maintenance_logs')
-            .select('*')
-            .eq('project_id', id)
-            .order('occurrence_date', { ascending: false });
-        setMaintenanceLogs(data || []);
+        const logs = await apiGetMaintenanceLogs(id!);
+        setMaintenanceLogs(Array.isArray(logs) ? logs : []);
     };
 
     const refreshContracts = async () => {
-        const { data } = await supabase
-            .from('contracts')
-            .select('*, invoices(*)')
-            .eq('project_id', id)
-            .order('created_at', { ascending: false });
-        setContracts(data || []);
+        const data = await apiGetContracts(id!);
+        setContracts(Array.isArray(data) ? data : []);
     };
 
     const handleContractSubmit = async (formData: ContractFormData) => {
-        const { error } = await supabase.from('contracts').insert({
+        const result = await apiCreateContract({
             project_id: id,
             contract_type: formData.contract_type,
             start_date: formData.start_date,
@@ -176,13 +117,13 @@ export default function ProjectDetailPage() {
             land_rent: parseFloat(formData.land_rent || '0'),
             communication_fee: parseFloat(formData.communication_fee || '0'),
         });
-        if (error) throw error;
+        if (result.error) throw new Error(result.error);
         await refreshContracts();
     };
 
     const handleInvoiceSubmit = async (formData: InvoiceFormData) => {
         if (!selectedContractId) return;
-        const { error } = await supabase.from('invoices').insert({
+        const result = await apiCreateInvoice({
             contract_id: selectedContractId,
             billing_period: formData.billing_period,
             issue_date: new Date().toISOString().split('T')[0],
@@ -190,22 +131,14 @@ export default function ProjectDetailPage() {
             status: formData.status,
             payment_due_date: formData.payment_due_date || null,
         });
-        if (error) throw error;
+        if (result.error) throw new Error(result.error);
         await refreshContracts();
     };
 
     const handleInvoiceStatusChange = async (invoiceId: number, newStatus: string) => {
         try {
-            await supabase
-                .from('invoices')
-                .update({ status: newStatus })
-                .eq('id', invoiceId);
-            const { data } = await supabase
-                .from('contracts')
-                .select('*, invoices(*)')
-                .eq('project_id', id)
-                .order('created_at', { ascending: false });
-            setContracts(data || []);
+            await apiUpdateInvoiceStatus(invoiceId, newStatus);
+            await refreshContracts();
         } catch (err) {
             console.error(err);
             alert('ステータス更新に失敗しました');

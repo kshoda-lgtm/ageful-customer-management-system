@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { supabase } from '../lib/supabase';
+import { apiGetAllMaintenanceLogs } from '../lib/api';
 import { Loader2, Search, MapPin, Filter, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import type { MaintenanceLog } from '../types';
 
@@ -20,25 +20,19 @@ export default function MaintenanceListPage() {
     useEffect(() => {
         const fetchLogs = async () => {
             try {
-                let query = supabase
-                    .from('maintenance_logs')
-                    .select('*, projects(project_name, customer_id, customers(contact_name, company_name))')
-                    .order('occurrence_date', { ascending: false });
-
-                if (statusFilter) {
-                    query = query.eq('status', statusFilter);
-                }
-
-                const { data, error } = await query;
-                if (error) throw error;
-
-                const flat = (data || []).map((log: any) => ({
+                const data = await apiGetAllMaintenanceLogs();
+                const list = Array.isArray(data) ? data : [];
+                const flat = list.map((log: any) => ({
                     ...log,
                     project_name: log.projects?.project_name,
                     company_name: log.projects?.customers?.company_name,
                     contact_name: log.projects?.customers?.contact_name,
                 }));
-                setLogs(flat);
+                if (statusFilter) {
+                    setLogs(flat.filter((l: any) => l.status === statusFilter));
+                } else {
+                    setLogs(flat);
+                }
             } catch (err) {
                 console.error('Failed to fetch maintenance logs:', err);
             } finally {

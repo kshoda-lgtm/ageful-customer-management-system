@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { supabase } from '../lib/supabase';
+import { apiGetCustomers } from '../lib/api';
 import { Search, Plus, User, MapPin, Phone } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
@@ -22,13 +22,17 @@ export default function CustomerListPage() {
     const fetchCustomers = async (searchTerm = '') => {
         setLoading(true);
         try {
-            let query = supabase.from('customers').select('*').order('created_at', { ascending: false });
+            const data = await apiGetCustomers();
+            const list = Array.isArray(data) ? data : [];
             if (searchTerm) {
-                query = query.or(`contact_name.ilike.%${searchTerm}%,company_name.ilike.%${searchTerm}%`);
+                const term = searchTerm.toLowerCase();
+                setCustomers(list.filter((c: Customer) =>
+                    (c.contact_name || '').toLowerCase().includes(term) ||
+                    (c.company_name || '').toLowerCase().includes(term)
+                ));
+            } else {
+                setCustomers(list);
             }
-            const { data, error } = await query;
-            if (error) throw error;
-            setCustomers(data || []);
         } catch (err) {
             console.error(err);
         } finally {

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import Layout from '../components/Layout';
 import ProjectModal, { type ProjectFormData } from '../components/ProjectModal';
-import { supabase } from '../lib/supabase';
+import { apiGetCustomer, apiCreateCustomer, apiUpdateCustomer, apiGetProjects, apiCreateProject } from '../lib/api';
 import { Loader2, Save, ArrowLeft, Building2, MapPin, Phone, Mail, FileText, Plus } from 'lucide-react';
 import type { Customer, Project } from '../types';
 
@@ -25,22 +25,10 @@ export default function CustomerDetailPage() {
 
         const fetchData = async () => {
             try {
-                // Fetch customer
-                const { data: customer, error } = await supabase
-                    .from('customers')
-                    .select('*')
-                    .eq('id', id)
-                    .single();
-                if (error) throw error;
+                const customer = await apiGetCustomer(id!);
+                if (customer.error) throw new Error(customer.error);
                 reset(customer);
-
-                // Fetch projects for this customer
-                const { data: projData } = await supabase
-                    .from('projects')
-                    .select('*')
-                    .eq('customer_id', id)
-                    .order('created_at', { ascending: false });
-                setProjects(projData || []);
+                setProjects(customer.projects || []);
             } catch (err) {
                 console.error(err);
                 navigate('/customers');
@@ -55,19 +43,12 @@ export default function CustomerDetailPage() {
         setIsSaving(true);
         try {
             if (id === 'new') {
-                const { data: newCustomer, error } = await supabase
-                    .from('customers')
-                    .insert(data)
-                    .select()
-                    .single();
-                if (error) throw error;
-                navigate(`/customers/${newCustomer.id}`);
+                const result = await apiCreateCustomer(data);
+                if (result.error) throw new Error(result.error);
+                navigate(`/customers/${result.data.id}`);
             } else {
-                const { error } = await supabase
-                    .from('customers')
-                    .update(data)
-                    .eq('id', id);
-                if (error) throw error;
+                const result = await apiUpdateCustomer(id!, data);
+                if (result.error) throw new Error(result.error);
                 alert('保存しました');
             }
         } catch (err) {
@@ -291,25 +272,19 @@ export default function CustomerDetailPage() {
                 isOpen={showProjectModal}
                 onClose={() => setShowProjectModal(false)}
                 onSubmit={async (formData: ProjectFormData) => {
-                    const { data, error } = await supabase.from('projects').insert({
+                    const result = await apiCreateProject({
                         customer_id: parseInt(id || '0'),
                         project_name: formData.project_name,
                         project_number: formData.project_number || null,
-                        address: formData.address || null,
-                        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-                        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+                        site_address: formData.address || null,
                         status: formData.status,
-                    }).select().single();
-                    if (error) throw error;
+                    });
+                    if (result.error) throw new Error(result.error);
                     // Refresh projects list
-                    const { data: updatedProjects } = await supabase
-                        .from('projects')
-                        .select('*')
-                        .eq('customer_id', id)
-                        .order('created_at', { ascending: false });
-                    setProjects(updatedProjects || []);
+                    const updatedProjects = await apiGetProjects(id!);
+                    setProjects(Array.isArray(updatedProjects) ? updatedProjects : []);
                     // Navigate to the new project
-                    if (data) navigate(`/projects/${data.id}`);
+                    if (result.data) navigate(`/projects/${result.data.id}`);
                 }}
                 customerName={watch('company_name') || watch('contact_name') || ''}
             />

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { supabase } from '../lib/supabase';
+import { apiGetProjects } from '../lib/api';
 import { Search, Loader2, Zap, MapPin } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Project } from '../types';
@@ -13,22 +13,23 @@ export default function ProjectListPage() {
     const fetchProjects = async (searchTerm = '') => {
         setLoading(true);
         try {
-            let query = supabase
-                .from('projects')
-                .select('*, customers(contact_name, company_name)')
-                .order('created_at', { ascending: false });
-            if (searchTerm) {
-                query = query.or(`project_name.ilike.%${searchTerm}%,project_number.ilike.%${searchTerm}%`);
-            }
-            const { data, error } = await query;
-            if (error) throw error;
+            const data = await apiGetProjects();
+            const list = Array.isArray(data) ? data : [];
             // Flatten customer data
-            const flat = (data || []).map((p: any) => ({
+            const flat = list.map((p: any) => ({
                 ...p,
                 contact_name: p.customers?.contact_name,
                 company_name: p.customers?.company_name,
             }));
-            setProjects(flat);
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                setProjects(flat.filter((p: any) =>
+                    (p.project_name || '').toLowerCase().includes(term) ||
+                    (p.project_number || '').toLowerCase().includes(term)
+                ));
+            } else {
+                setProjects(flat);
+            }
         } catch (err) {
             console.error(err);
         } finally {
