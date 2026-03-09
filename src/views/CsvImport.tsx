@@ -144,18 +144,27 @@ function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] 
     let pcsMfr = cols[18]?.trim() ?? ''
     const pcsModel = cols[19]?.trim() ?? ''
 
-    // col12が空の場合、末尾4列を使う
-    if (!panelKw && cols.length >= 80) {
-      panelKw = cols[77]?.trim() ?? ''
-      panelMfr = panelMfr || (cols[78]?.trim() ?? '')
-      pcsKw = cols[79]?.trim() ?? ''
-      pcsMfr = pcsMfr || (cols[80]?.trim() ?? '')
+    // col12が空の場合、BM〜BP列（code 64〜67）のパネルデータを使う
+    if (!panelKw && cols.length >= 65) {
+      panelKw = cols[64]?.trim() ?? ''
+      panelMfr = panelMfr || (cols[65]?.trim() ?? '')
+      pcsKw = cols[66]?.trim() ?? ''
+      pcsMfr = pcsMfr || (cols[67]?.trim() ?? '')
     }
 
     // 設置住所 = 都道府県 + 市区町村以降
     const prefecture = cols[9]?.trim() ?? ''
     const cityStreet = cols[10]?.trim() ?? ''
     const siteAddress = [prefecture, cityStreet].filter(Boolean).join('')
+
+    // BD〜BL列（code 55〜63）の保守管理メモを収集して notes に追加
+    const legacyMemos = [55, 56, 57, 58, 59, 60, 61, 62, 63]
+      .map(i => cols[i]?.trim() ?? '')
+      .filter(Boolean)
+    const baseNotes = cols[47]?.trim() ?? ''
+    const combinedNotes = legacyMemos.length > 0
+      ? [baseNotes, '【旧メモ】' + legacyMemos.join(' / ')].filter(Boolean).join('\n')
+      : baseNotes
 
     const row: CsvImportRow = {
       customer_name: customerName,
@@ -184,7 +193,7 @@ function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] 
       land_cost: cleanNumStr(cols[40]?.trim() ?? ''),
       amuras_member_no: cols[48]?.trim() ?? '',
       monitoring_system: cols[26]?.trim() ?? '',
-      notes: cols[47]?.trim() ?? '',
+      notes: combinedNotes,
       latitude: lat,
       longitude: lng,
       panel_kw: panelKw,
