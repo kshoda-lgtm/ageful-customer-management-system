@@ -1,22 +1,29 @@
-# Ageful Manager — 太陽光発電 顧客管理システム 仕様書
+# エイジフル 顧客管理システム 仕様書
 
-バージョン: 0.1.0
-最終更新: 2026-03-09
+バージョン: 1.0.0
+最終更新: 2026-03-11
 
 ---
 
-## 1. アプリ概要
+## 1. システム概要
 
 ### 目的
-太陽光発電所の顧客・案件情報を一元管理するWebアプリケーション。
-既存のスプレッドシート（Googleスプレッドシート / Excel）による管理をWebアプリに移行し、情報の検索・更新・共有を効率化する。
+太陽光発電所の顧客・案件・保守・請求を一元管理するWebアプリケーション。
+現在Googleスプレッドシートで管理している以下3つのシートを完全移行する。
 
-### 主な対象業務
-- 顧客情報の管理（個人・法人）
-- 太陽光発電所（案件）の情報管理
-- 保守記録のトラッキング
-- 契約・請求状況の管理
-- 既存スプレッドシートデータの一括取り込み（CSVインポート）
+| 既存シート | 役割 |
+|---|---|
+| 全体.csv | 案件マスター（顧客・発電所・契約・監視情報） |
+| 保守.csv | 年度別の請求・入金・定期保守記録 |
+| メンテ対応.csv | 保守対応記録（問い合わせ〜完了トラッキング） |
+
+### 利用者
+一人社長（1名のみ）
+
+### 基本方針
+- 情報を複数の角度から参照できる（案件視点・顧客視点・保守視点・請求視点）
+- 画面をまたいでデータが連動する（案件 ↔ 顧客 ↔ 保守対応 ↔ 請求）
+- 保守対応記録・請求記録を「完了」としてクローズできる
 
 ---
 
@@ -26,456 +33,501 @@
 |---|---|
 | フロントエンド | React 19 + TypeScript |
 | ビルドツール | Vite 6 |
-| バックエンド/DB | Supabase（PostgreSQL） |
-| 認証 | なし（RLS で全操作許可） |
-| デプロイ | 静的ファイル（`dist/`）を任意のホスティングに配置 |
-| モックモード | `.env` 未設定時はインメモリのモックストアで動作 |
+| バックエンド/DB | Supabase（PostgreSQL + Storage） |
+| スタイル | Tailwind CSS |
+| 認証 | なし（1人利用のためRLSで全操作許可） |
+| デプロイ | Vercel |
+| モックモード | `.env` 未設定時はインメモリモックで動作 |
 
-### ディレクトリ構成
+---
+
+## 3. データモデル
+
+### ER図
 
 ```
-ageful.manager.claude/
-├── src/
-│   ├── App.tsx              # ルート・ナビゲーション
-│   ├── main.tsx             # エントリポイント
-│   ├── types.ts             # 全型定義
-│   ├── styles.css           # グローバルスタイル
-│   ├── views/               # 各画面コンポーネント
-│   │   ├── Dashboard.tsx
-│   │   ├── Projects.tsx
-│   │   ├── Customers.tsx
-│   │   ├── CustomerDetail.tsx
-│   │   ├── Maintenance.tsx
-│   │   ├── Billing.tsx
-│   │   └── CsvImport.tsx
-│   ├── components/          # 共通UIコンポーネント
-│   │   ├── Modal.tsx
-│   │   ├── Confirm.tsx
-│   │   └── StatusBadge.tsx
-│   └── lib/
-│       ├── supabase.ts      # Supabaseクライアント設定
-│       ├── data.ts          # データ取得関数
-│       ├── actions.ts       # データ更新・作成関数
-│       └── mock-store.ts    # オフライン用モックデータ
-├── database/
-│   └── schema.sql           # DBスキーマ定義
-├── .env                     # Supabase接続情報（要作成）
-└── vite.config.ts
+customers（顧客）
+  ├── attachments（PDF添付ファイル）
+  └── projects（案件）1:N
+        ├── contracts（契約・請求情報）1:1
+        │     └── annual_records（年度別入金・保守記録）1:N
+        ├── maintenance_responses（保守対応記録）1:N
+        └── periodic_maintenance（定期保守記録）1:N
 ```
 
 ---
 
-## 3. 環境設定
-
-### Supabase接続（`.env` ファイルを作成）
-
-```env
-VITE_SUPABASE_URL=https://xxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJ...
-```
-
-`.env` が存在しない場合、アプリはモックモードで動作する。
-モックモードではブラウザのメモリ上にデータが保持され、リロードで消える。
-
-### 開発サーバー起動
-
-```bash
-npm install
-npm run dev      # http://localhost:5173
-```
-
-### 本番ビルド
-
-```bash
-npm run build    # dist/ に静的ファイル生成
-```
-
----
-
-## 4. データモデル
-
-### ER図（概念）
-
-```
-customers
-  └── projects (1:N)
-        ├── power_plant_specs (1:1)
-        ├── maintenance_logs (1:N)
-        └── contracts (1:N)
-              └── invoices (1:N)
-```
-
-### テーブル定義
-
-#### customers（顧客）
+### customers（顧客）
 
 | カラム | 型 | 説明 |
 |---|---|---|
 | id | SERIAL PK | |
-| type | TEXT | `individual`（個人）/ `corporate`（法人） |
+| name | TEXT NOT NULL | 顧客名（個人名） |
 | company_name | TEXT | 法人名（法人の場合） |
-| contact_name | TEXT NOT NULL | 担当者名・個人名 |
+| is_corporate | BOOLEAN | 法人フラグ |
 | email | TEXT | |
 | phone | TEXT | |
-| postal_code | TEXT | 顧客の郵便番号 |
-| address | TEXT | 顧客の住所 |
-| notes | TEXT | 備考 |
+| postal_code | TEXT | |
+| address | TEXT | |
+| created_at | TIMESTAMPTZ | |
 
-#### projects（案件）
+**法人判定:** 名前に「㈱」「株式」「有限」「合同」「(株)」「(有)」等を含む場合に法人として登録。
+
+---
+
+### attachments（PDF添付ファイル）
+
+顧客に紐づく書類（契約書・保証書・施工図面・点検報告書など）。
 
 | カラム | 型 | 説明 |
 |---|---|---|
 | id | SERIAL PK | |
 | customer_id | FK → customers | |
-| project_number | TEXT | 案件番号 |
-| project_name | TEXT NOT NULL | 案件名（発電所名） |
-| site_address | TEXT | 設置住所 |
-| key_number | TEXT | カギNo |
-| grid_id | TEXT | 経産省 系統ID |
-| grid_certified_at | DATE | 系統認定日 |
-| fit_period | INTEGER | FIT期間（年） |
-| fit_end_date | DATE | FIT満了日 |
-| power_supply_start_date | DATE | 需給開始日 |
-| generation_point_id | TEXT | 受電地点特定番号 |
-| customer_number | TEXT | お客さま番号 |
-| handover_date | DATE | 引渡日 |
-| abolition_date | DATE | 廃止日 |
-| sales_company | TEXT | 販売会社 |
-| referrer | TEXT | 紹介者 |
-| sales_price | INTEGER | 販売価格（税込） |
-| reference_price | INTEGER | 価格参照 |
-| land_cost | INTEGER | 土地代 |
-| amuras_member_no | TEXT | アムラス会員番号 |
-| monitoring_system | TEXT | 遠隔監視システム名 |
-| notes | TEXT | 備考 |
-| latitude | NUMERIC(10,7) | 緯度 |
-| longitude | NUMERIC(10,7) | 経度 |
+| file_name | TEXT NOT NULL | 表示用ファイル名 |
+| file_url | TEXT NOT NULL | Supabase Storage URL |
+| file_type | TEXT | `pdf` / `image` / `other` |
+| description | TEXT | 説明・メモ |
+| uploaded_at | TIMESTAMPTZ | |
 
-#### power_plant_specs（発電所スペック）
+---
 
-1案件につき1レコード（UNIQUE制約）。
+### projects（案件）
+
+太陽光発電所1基 = 1案件。
 
 | カラム | 型 | 説明 |
 |---|---|---|
-| project_id | FK → projects UNIQUE | |
+| id | SERIAL PK | |
+| customer_id | FK → customers | |
+| project_no | TEXT | 案件No（任意） |
+| project_name | TEXT NOT NULL | 案件名・発電所名（例：稲葉第二、吉野） |
+| site_postal_code | TEXT | 発電所郵便番号 |
+| site_prefecture | TEXT | 都道府県 |
+| site_address | TEXT | 市区町村以降の住所 |
+| latitude | NUMERIC(10,7) | 緯度 |
+| longitude | NUMERIC(10,7) | 経度 |
 | panel_kw | NUMERIC | パネル出力（kW） |
 | panel_count | INTEGER | パネル枚数 |
-| panel_manufacturer | TEXT | パネルメーカー |
+| panel_maker | TEXT | パネルメーカー |
 | panel_model | TEXT | パネル型番 |
 | pcs_kw | NUMERIC | パワコン出力（kW） |
 | pcs_count | INTEGER | パワコン台数 |
-| pcs_manufacturer | TEXT | パワコンメーカー |
+| pcs_maker | TEXT | パワコンメーカー |
 | pcs_model | TEXT | パワコン型番 |
-
-#### maintenance_logs（保守記録）
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| project_id | FK → projects | |
-| inquiry_date | DATE | 問合せ日 |
-| occurrence_date | DATE | 発生日 |
-| work_type | TEXT | 作業種別 |
-| target_area | TEXT | 対象箇所 |
-| situation | TEXT | 状況 |
-| response | TEXT | 対応内容 |
-| report | TEXT | 報告内容 |
-| status | TEXT | `pending` / `in_progress` / `completed` |
-
-#### contracts（契約）
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| project_id | FK → projects | |
-| contract_type | TEXT | 契約種別（デフォルト: `maintenance`） |
-| business_owner | TEXT | 事業主 |
-| contractor | TEXT | 受託者 |
-| start_date | DATE | 契約開始日 |
-| end_date | DATE | 契約終了日 |
-| annual_maintenance_fee | INTEGER | 年間保守料（円） |
-| communication_fee | INTEGER | 通信費（円） |
-
-#### invoices（請求）
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| contract_id | FK → contracts | |
-| billing_period | TEXT | 請求期間 |
-| issue_date | DATE | 発行日 |
-| amount | INTEGER | 金額（円） |
-| status | TEXT | `unbilled`（未請求）/ `billed`（請求済）/ `paid`（入金済） |
-| payment_due_date | DATE | 支払期限 |
-| paid_at | DATE | 入金日 |
+| grid_id | TEXT | 経産省 系統ID |
+| grid_certified_at | DATE | 経産認定日 |
+| fit_period | INTEGER | FIT年数 |
+| power_supply_start_date | DATE | 需給開始日 |
+| customer_number | TEXT | お客さま番号 |
+| generation_point_id | TEXT | 受電地点特定番号 |
+| meter_reading_day | TEXT | 検針日 |
+| monitoring_system | TEXT | 遠隔監視システム名 |
+| monitoring_id | TEXT | 監視システムID |
+| monitoring_user | TEXT | 監視システムユーザー名 |
+| monitoring_pw | TEXT | 監視システムPW |
+| has_4g | BOOLEAN | 4G対応フラグ |
+| key_number | TEXT | 鍵No |
+| local_association | TEXT | 自治会 |
+| old_owner | TEXT | 旧所有者 |
+| sales_company | TEXT | 販売会社 |
+| referrer | TEXT | 紹介者 |
+| handover_date | DATE | 引渡日 |
+| sales_price | BIGINT | 販売価格（税込・円） |
+| reference_price | BIGINT | 価格備考（税込・円） |
+| land_cost | BIGINT | 土地代（円） |
+| amuras_member_no | TEXT | アプラス会員番号 |
+| notes | TEXT | 備考 |
+| created_at | TIMESTAMPTZ | |
 
 ---
 
-## 5. 画面仕様
+### contracts（契約・請求情報）
 
-### 5-1. ダッシュボード
+案件1つにつき1レコード。
 
-**目的:** アプリ全体の状況を一覧確認する。
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | SERIAL PK | |
+| project_id | FK → projects UNIQUE | |
+| billing_method | TEXT | 請求方法（`請求書` / `ROBOT`） |
+| billing_due_day | TEXT | 請求予定日（例：`12月1日`） |
+| billing_amount_ex | BIGINT | 請求額（税抜・円） |
+| billing_amount_inc | BIGINT | 請求額（税込・円） |
+| annual_maintenance_ex | BIGINT | 年間保守費（税抜・円） |
+| annual_maintenance_inc | BIGINT | 年間保守費（税込・円） |
+| land_cost_monthly | BIGINT | 地代（円） |
+| insurance_fee | BIGINT | 保険料（円） |
+| other_fee | BIGINT | その他費用（円） |
+| transfer_account | BIGINT | 振替口座（税込・円） |
+| subcontractor | TEXT | 委託先 |
+| subcontract_fee_ex | BIGINT | 委託費（税抜・円） |
+| subcontract_fee_inc | BIGINT | 委託費（税込・円） |
+| subcontract_billing_day | TEXT | 委託毎月日 |
+| subcontract_start_date | DATE | 委託開始日 |
+| maintenance_start_date | DATE | 保守開始日 |
+| notes | TEXT | 備考 |
+
+---
+
+### annual_records（年度別入金・保守記録）
+
+保守.csvの「年度別」データ（2023/2024/2025/2026年ごとの入金日・請求日・保守記録メモ）。
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | SERIAL PK | |
+| contract_id | FK → contracts | |
+| year | INTEGER | 対象年度（例：2025） |
+| billing_date | DATE | 請求日 |
+| received_date | DATE | 入金日 |
+| maintenance_record | TEXT | 保守記録メモ（例：「2025.09.08除草・報告書」） |
+| escort_record | TEXT | 駆付記録 |
+| status | TEXT | `未入金` / `請求済` / `入金済` |
+
+---
+
+### maintenance_responses（保守対応記録）
+
+メンテ対応.csvのデータ。問い合わせ起点のトラブル・作業対応。
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | SERIAL PK | |
+| response_no | TEXT | 管理番号（例：`25001`） |
+| project_id | FK → projects | |
+| status | TEXT | `対応中` / `完了` |
+| inquiry_date | DATE | 問合日 |
+| occurrence_date | DATE | 発生日 |
+| target_area | TEXT | 対象箇所（例：パワコン、遠隔、除草） |
+| situation | TEXT | 状況（フリーテキスト） |
+| response_content | TEXT | 対応内容（フリーテキスト） |
+| report | TEXT | 報告（フリーテキスト） |
+| created_at | TIMESTAMPTZ | |
+
+---
+
+### periodic_maintenance（定期保守記録）
+
+事後報告型。「やったので記録する」シンプルなログ。
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| id | SERIAL PK | |
+| project_id | FK → projects | |
+| record_date | DATE NOT NULL | 実施日 |
+| work_type | TEXT | 種別（例：点検、除草、巡回） |
+| content | TEXT | 内容・メモ |
+| created_at | TIMESTAMPTZ | |
+
+---
+
+## 4. 画面構成（10画面）
+
+```
+ダッシュボード
+案件一覧 → 案件詳細
+顧客一覧 → 顧客詳細
+保守対応一覧 → 保守対応詳細
+請求一覧 → 請求詳細
+CSVインポート
+```
+
+---
+
+### 画面①：ダッシュボード
+
+**目的:** 毎日の業務開始時に全体状況をひと目で把握する。
 
 **表示内容:**
 - KPIカード（4つ）
-  - 顧客総数
   - 案件総数
-  - 対応中の保守件数（`pending` + `in_progress`）
-  - 未請求の請求件数
-- 請求KPIグリッド（未請求金額合計・入金済金額合計）
-- 請求対応待ちリスト（未請求・請求済の明細一覧）
-- 最近の保守記録（最新6件）
-
-**操作:**
-- KPIカードをクリックすると該当画面へ遷移
+  - 顧客総数
+  - 対応中の保守対応件数（クリック → 保守対応一覧）
+  - 今月入金予定件数（クリック → 請求一覧）
+- 対応中の保守対応リスト（最新10件）
+  - 案件名・問合日・対象箇所・経過日数
+- 今月の請求予定リスト
+  - 案件名・請求予定日・金額・ステータス
 
 ---
 
-### 5-2. 案件一覧
+### 画面②：案件一覧
 
-**目的:** 全発電所案件を一覧・検索・管理する。
+**目的:** 全発電所案件を検索・管理する。
 
 **表示内容:**
-- 案件カード一覧（案件名・顧客名・設置住所・引渡日・FIT満了日・販売会社）
-- FIT満了日アラート（満了済: 赤、365日以内: オレンジ）
+- 案件一覧テーブル
+  - 案件名、顧客名、FIT（年数・満了年）、委託先、保守開始日
+  - FIT満了アラート（満了済：赤、1年以内：オレンジ）
 
 **操作:**
-- テキスト検索（案件名・顧客名・住所・販売会社）
-- 新規案件作成（モーダル）
-  - 既存顧客から選択 または 新規顧客を同時作成
-  - 案件基本情報 / FIT・系統情報 / 販売情報 / 保守管理 / 座標 を入力
-- 案件カードクリック → 顧客詳細画面（その顧客にフォーカス）へ遷移
+- テキスト検索（案件名・顧客名）
+- 委託先フィルター
+- 行クリック → 案件詳細へ遷移
+- 新規案件登録（モーダル）
 
 ---
 
-### 5-3. 顧客管理
+### 画面③：案件詳細
 
-**目的:** 顧客（個人・法人）の情報を一覧・管理する。
+**目的:** 1案件のすべての情報を確認・編集する。他の画面へのハブ。
+
+**表示内容（タブ構成）:**
+
+**基本情報タブ**
+- 発電所名・住所・座標（地図リンク）
+- パネル情報（kW・枚数・メーカー・型番）
+- パワコン情報（kW・台数・メーカー・型番）
+- 経産情報（系統ID・認定日・FIT・需給開始日）
+- 監視情報（システム名・ID・PW・4G対応）
+- 顧客情報（リンク付き → 顧客詳細へ）
+- 販売情報（販売会社・紹介者・引渡日・価格）
+
+**保守対応タブ**
+- この案件の保守対応記録一覧
+  - 管理No・問合日・対象箇所・ステータス
+  - 行クリック → 保守対応詳細へ
+  - 新規保守対応作成ボタン
+
+**定期保守タブ**
+- この案件の定期保守記録一覧
+  - 実施日・種別・内容
+  - 新規定期保守記録追加ボタン（実施日・種別・内容を入力）
+
+**請求タブ**
+- この案件の契約・請求情報（リンク付き → 請求詳細へ）
+- 年度別入金状況サマリー
+
+**操作:**
+- 基本情報の編集（インライン or モーダル）
+- 「戻る」→ 案件一覧
+
+---
+
+### 画面④：顧客一覧
+
+**目的:** 全顧客を検索・管理する。
 
 **表示内容:**
-- 顧客カード一覧（顧客名・会社名・連絡先・保有案件数・作成日）
+- 顧客一覧テーブル
+  - 顧客名・電話・メール・保有案件数
 
 **操作:**
-- テキスト検索（顧客名・会社名・メール・電話）
-- 新規顧客作成（モーダル）
-- 顧客編集（モーダル）
-- 顧客削除（確認ダイアログ付き、カスケード削除）
-- 顧客カードクリック → 顧客詳細画面へ遷移
-- CSVエクスポート（現在表示中の顧客一覧をダウンロード）
+- テキスト検索（顧客名・電話・メール）
+- 行クリック → 顧客詳細へ遷移
+- 新規顧客登録（モーダル）
 
 ---
 
-### 5-4. 顧客詳細
+### 画面⑤：顧客詳細
 
-**目的:** 特定顧客の全情報を1画面で確認・編集する。
+**目的:** 1顧客の全情報と添付書類を管理する。
 
 **表示内容:**
-- 顧客基本情報（編集ボタンあり）
-- その顧客が保有する案件一覧
-  - 発電スペック（パネル・パワコン）
-  - FIT情報・販売情報
-- 最近の保守記録
+- 顧客基本情報（名前・連絡先・住所）
+- 保有案件一覧（クリック → 案件詳細へ）
+  - 案件名・FIT・委託先・保守開始日
+- PDF添付ファイル
+  - ファイル名・説明・アップロード日
+  - PDFプレビュー or ダウンロード
+  - 複数ファイル管理可能
 
 **操作:**
-- 顧客情報編集（モーダル）
-- 新規案件作成（この顧客に紐づく）
-- 案件編集（モーダル）
-- 案件削除
-- 「戻る」で顧客管理画面へ
+- 顧客情報の編集
+- PDF添付ファイルのアップロード（ドラッグ&ドロップ対応）
+- PDF削除
 
 ---
 
-### 5-5. 保守記録
+### 画面⑥：保守対応一覧
 
-**目的:** 全案件の保守・点検ログをトラッキングする。
+**目的:** すべての保守対応案件をステータス管理する。
 
 **表示内容:**
-- 保守ログ一覧（案件名・顧客名・作業種別・発生日・ステータス）
+- 保守対応一覧テーブル
+  - 管理No・発電所名（案件リンク）・事業者名・問合日・発生日・対象箇所・ステータス
 
 **操作:**
-- テキスト検索（案件名・顧客名・作業種別）
-- ステータスフィルター（全件 / 未対応 / 対応中 / 完了）
-- ステータス変更（ドロップダウンで即時更新）
-- 新規保守ログ作成（モーダル、案件選択→情報入力）
-- 保守ログ削除（確認ダイアログ付き）
-- CSVエクスポート
-
-**ステータス:**
-
-| 値 | 表示 | 意味 |
-|---|---|---|
-| `pending` | 未対応 | 作業未着手 |
-| `in_progress` | 対応中 | 作業中 |
-| `completed` | 完了 | 作業完了 |
+- ステータスフィルター（全件 / 対応中 / 完了）
+- テキスト検索（発電所名・対象箇所）
+- 行クリック → 保守対応詳細へ
+- 新規保守対応作成（モーダル）
+- ステータスをここから直接変更可（完了ボタン）
 
 ---
 
-### 5-6. 契約・請求
+### 画面⑦：保守対応詳細
 
-**目的:** 契約ごとの請求状況を管理し、入金ステータスを更新する。
+**目的:** 1件の保守対応の詳細確認・編集・完了クローズ。
 
 **表示内容:**
-- KPIカード（未請求合計・請求済合計・入金済合計）
-- 請求一覧（契約名・案件名・請求期間・金額・発行日・支払期限・ステータス）
+- 管理No（例：25001）
+- 発電所名（案件詳細へのリンク）・事業者名
+- 問合日・発生日
+- 対象箇所・状況・対応内容・報告
+- ステータス（対応中 / 完了）
 
 **操作:**
-- ステータス変更（未請求→請求済→入金済）
-- CSVエクスポート
-
-**ステータス:**
-
-| 値 | 表示 |
-|---|---|
-| `unbilled` | 未請求 |
-| `billed` | 請求済 |
-| `paid` | 入金済 |
+- 全フィールド編集
+- 「完了にする」ボタン（確認ダイアログあり）
+- 「戻る」→ 保守対応一覧
 
 ---
 
-### 5-7. CSVインポート
+### 画面⑧：請求一覧
+
+**目的:** 全案件の請求状況を一覧管理する。
+
+**表示内容:**
+- 請求一覧テーブル
+  - 事業主・案件名・請求方法・請求予定日・年間保守費（税込）・委託先
+  - 当年度の入金ステータス（未入金 / 請求済 / 入金済）
+
+**操作:**
+- ステータスフィルター
+- テキスト検索（事業主・案件名）
+- 行クリック → 請求詳細へ
+
+---
+
+### 画面⑨：請求詳細
+
+**目的:** 1案件の請求情報と年度別の入金・保守記録を管理する。
+
+**表示内容:**
+
+**契約情報セクション**
+- 請求方法・請求予定日
+- 請求額（税抜/税込）・年間保守費（税抜/税込）
+- 地代・保険料・その他費用・振替口座
+- 委託先・委託費・委託開始日
+- 保守開始日
+
+**年度別記録セクション（タブまたは縦並び）**
+- 年度（2023・2024・2025・2026・...）ごとに表示
+- 各年度の：入金日・請求日・ステータス・保守記録メモ・駆付記録
+- ステータス変更ボタン
+
+**操作:**
+- 契約情報の編集
+- 年度別記録の追加・編集
+- ステータスの変更（未入金 → 請求済 → 入金済）
+
+---
+
+### 画面⑩：CSVインポート
 
 **目的:** 既存スプレッドシートデータを一括取り込む。
 
-**対応フォーマット:**
-1. **テンプレート形式** — アプリが提供するCSVテンプレート（1行ヘッダー）
-2. **既存データ形式** — エイジフル既存スプレッドシート（2行ヘッダー）
-
-フォーマットはアップロード時に自動判別される（1行目のcol1が「案件名」なら既存データ形式）。
+**対応フォーマット（自動判別）:**
+1. **レガシー形式（全体.csv）** — 先頭行のcol0が「案件名」なら自動判別
+2. **保守形式（保守.csv）** — 契約・年度別記録をインポート
+3. **メンテ対応形式（メンテ対応.csv）** — 保守対応記録をインポート
 
 **処理フロー:**
 1. CSVファイルをアップロード（クリック or ドラッグ&ドロップ）
-2. プレビュー表示（フォーマット種別バッジ・件数・エラー一覧）
-3. 「インポート」ボタンで確定
-4. 顧客の名寄せ（同一の顧客名が既に存在する場合は既存IDを使用）
-5. 案件・発電スペックを順次作成
-6. 結果表示（成功件数・失敗件数・エラー詳細）
+2. フォーマット自動判別 → プレビュー表示（件数・エラー一覧）
+3. 「インポート実行」で確定
+4. 顧客名寄せ（同名の顧客が存在すれば既存IDを使用）
+5. 結果表示（成功件数・失敗件数・エラー詳細）
 
-**既存データ形式の列マッピング:**
+**全体.csvの列マッピング（列インデックスは0始まり）:**
 
-| 列インデックス | 内容 | マッピング先 |
+| 列 | 内容 | マッピング先 |
 |---|---|---|
-| 1 | 案件名 | project_name |
-| 2 | 顧客名 | customer_name / company_name |
-| 3 | E-mail | email |
-| 4 | 電話番号 | phone |
-| 5 | 顧客郵便番号 | postal_code |
-| 6 | 顧客住所 | customer_address |
-| 9+10 | 都道府県+市区町村 | site_address（結合） |
-| 11 | Google Map座標 | latitude / longitude |
-| 12 | パネルkW | panel_kw |
-| 13 | パネル説明（枚数パース） | panel_count |
-| 14 | パネルメーカー | panel_manufacturer |
-| 15 | パネル型番 | panel_model |
-| 16 | パワコンkW | pcs_kw |
-| 17 | パワコン説明（台数パース） | pcs_count |
-| 18 | パワコンメーカー | pcs_manufacturer |
-| 19 | パワコン型番 | pcs_model |
-| 20 | 経産ID | grid_id |
-| 21 | 経産認定日 | grid_certified_at |
-| 22 | FIT（数値を抽出） | fit_period |
-| 23 | 需給開始日 | power_supply_start_date |
-| 24 | お客さま番号 | customer_number |
-| 25 | 受電地点特定番号 | generation_point_id |
-| 26 | 遠隔監視システム | monitoring_system |
-| 33 | 販売会社 | sales_company |
-| 34 | 紹介者 | referrer |
-| 36 | 引渡日 | handover_date |
-| 38 | 販売価格（税込） | sales_price |
-| 39 | 価格備考（税込） | reference_price |
-| 40 | 土地代 | land_cost |
-| 46 | カギNo | key_number |
-| 47 | 備考 | notes |
-| 48 | アプラス会員番号 | amuras_member_no |
-| 77〜80 | パネルkW/メーカー/パワコンkW/メーカー | col12が空の場合フォールバック |
-
-**法人判定:** 顧客名に「㈱」「株式」「有限」「合同」「(株)」「(有)」等を含む場合、`type = corporate` として登録。
-
----
-
-## 6. アーキテクチャ
-
-### データフロー
-
-```
-[ブラウザ（React）]
-      │
-      ├── lib/data.ts      ← データ取得（SELECT相当）
-      │       │
-      ├── lib/actions.ts   ← データ更新（INSERT/UPDATE/DELETE相当）
-      │       │
-      └── lib/supabase.ts  ← Supabaseクライアント
-              │
-    ┌─────────┴──────────┐
-    │  .env 設定あり      │  .env 設定なし
-    │  Supabase API       │  mock-store.ts
-    │  (PostgreSQL)       │  (インメモリ)
-    └─────────────────────┘
-```
-
-### モックモード
-`.env` ファイルがない状態でもアプリが起動・動作するよう、`mock-store.ts` にインメモリのデータストアを実装している。全データ取得・作成・更新・削除操作がモックで動作する。ただし**ページリロードでデータは消える**。
-
-画面上部に「モックデータで表示中」バナーが表示される。
-
-### Supabase RLS
-現在は全テーブルに「Allow all」ポリシーが適用されており、認証なしで全操作が可能。
-将来的に認証を追加する場合はポリシーを変更する。
+| 0 | 案件名 | project_name |
+| 1 | 顧客名 | customer.name |
+| 2 | E-mail | customer.email |
+| 3 | 電話番号 | customer.phone |
+| 4 | 顧客郵便番号 | customer.postal_code |
+| 5 | 顧客住所 | customer.address |
+| 7 | 発電所郵便番号 | site_postal_code |
+| 8 | 都道府県 | site_prefecture |
+| 9 | 市区町村以降 | site_address |
+| 10 | Google Map座標 | latitude / longitude |
+| 11 | パネルkW | panel_kw |
+| 12 | パネル説明（枚数パース） | panel_count |
+| 13 | パネルメーカー | panel_maker |
+| 14 | パネル型番 | panel_model |
+| 15 | パワコンkW | pcs_kw |
+| 16 | パワコン説明（台数パース） | pcs_count |
+| 17 | パワコンメーカー | pcs_maker |
+| 18 | パワコン型番 | pcs_model |
+| 19 | 経産ID | grid_id |
+| 20 | 経産認定日 | grid_certified_at |
+| 21 | FIT | fit_period |
+| 22 | 需給開始日 | power_supply_start_date |
+| 23 | お客さま番号 | customer_number |
+| 24 | 受電地点特定番号 | generation_point_id |
+| 25 | 遠隔監視システム | monitoring_system |
+| 31 | 販売会社 | sales_company |
+| 32 | 紹介者 | referrer |
+| 34 | 引渡日 | handover_date |
+| 36 | 販売価格 | sales_price |
+| 37 | 価格備考 | reference_price |
+| 38 | 土地代 | land_cost |
+| 44 | 鍵No | key_number |
+| 45 | 備考 | notes |
+| 46 | アプラス会員番号 | amuras_member_no |
+| 54-57 | パネル/パワコン情報（col11空の場合フォールバック） | - |
 
 ---
 
-## 7. 主要な型定義（types.ts）
+## 5. 画面間の連動
 
-```typescript
-// 顧客
-type Customer = {
-  id: number
-  type: 'individual' | 'corporate'
-  company_name: string | null
-  contact_name: string
-  email: string | null
-  phone: string | null
-  postal_code: string | null
-  address: string | null
-  notes: string | null
-  created_at: string
-  project_count?: number  // 一覧表示用（JOIN結果）
-}
+| 起点画面 | 操作 | 遷移先 |
+|---|---|---|
+| ダッシュボード | 保守対応リスト行クリック | 保守対応詳細 |
+| ダッシュボード | 請求リスト行クリック | 請求詳細 |
+| 案件一覧 | 行クリック | 案件詳細 |
+| 案件詳細 | 顧客名クリック | 顧客詳細 |
+| 案件詳細（保守対応タブ） | 行クリック | 保守対応詳細 |
+| 案件詳細（請求タブ） | リンククリック | 請求詳細 |
+| 顧客一覧 | 行クリック | 顧客詳細 |
+| 顧客詳細 | 案件行クリック | 案件詳細 |
+| 保守対応一覧 | 行クリック | 保守対応詳細 |
+| 保守対応詳細 | 発電所名クリック | 案件詳細 |
+| 請求一覧 | 行クリック | 請求詳細 |
+| 請求詳細 | 案件名クリック | 案件詳細 |
 
-// 案件（一覧表示用）
-type ProjectRow = {
-  id: number
-  customer_id: number
-  project_number: string | null
-  project_name: string
-  site_address: string | null
-  key_number: string | null
-  fit_end_date: string | null
-  handover_date: string | null
-  sales_company: string | null
-  created_at: string
-  customer_name: string    // JOINで取得
-  company_name: string | null
-}
+---
 
-// 保守ステータス
-type MaintenanceStatus = 'pending' | 'in_progress' | 'completed'
+## 6. ディレクトリ構成
 
-// 請求ステータス
-type InvoiceStatus = 'unbilled' | 'billed' | 'paid'
-
-// ダッシュボード集計
-type DashboardStats = {
-  totalCustomers: number
-  totalProjects: number
-  pendingMaintenanceCount: number
-  unbilledInvoiceCount: number
-}
+```
+src/
+├── App.tsx                    # ルート・ナビゲーション
+├── main.tsx
+├── types.ts                   # 全型定義
+├── styles.css
+├── views/
+│   ├── Dashboard.tsx          # ①ダッシュボード
+│   ├── Projects.tsx           # ②案件一覧
+│   ├── ProjectDetail.tsx      # ③案件詳細
+│   ├── Customers.tsx          # ④顧客一覧
+│   ├── CustomerDetail.tsx     # ⑤顧客詳細
+│   ├── MaintenanceResponses.tsx   # ⑥保守対応一覧
+│   ├── MaintenanceResponseDetail.tsx  # ⑦保守対応詳細
+│   ├── Billing.tsx            # ⑧請求一覧
+│   ├── BillingDetail.tsx      # ⑨請求詳細
+│   └── CsvImport.tsx          # ⑩CSVインポート
+├── components/
+│   ├── Modal.tsx
+│   ├── Confirm.tsx
+│   ├── StatusBadge.tsx
+│   └── FileUpload.tsx         # PDF添付用
+└── lib/
+    ├── supabase.ts
+    ├── data.ts                # データ取得
+    ├── actions.ts             # データ更新
+    └── mock-store.ts          # オフライン用モック
 ```
 
 ---
 
-## 8. 今後の拡張ポイント
+## 7. 今後の拡張候補
 
-- **認証追加:** Supabase Auth を有効化し、ユーザー単位でのアクセス制御
-- **FIT満了日通知:** 満了が近い案件のメール通知
-- **地図表示:** 座標データを使った発電所マップビュー
-- **保守レポートPDF出力:** 保守記録の帳票化
-- **契約・請求の作成UI:** 現在は請求ステータスの更新のみ対応
+- 地図表示（座標データを使った発電所マップ）
+- 保守報告書PDF出力
+- FIT満了アラートメール通知
+- スマホ対応（現地からの入力）

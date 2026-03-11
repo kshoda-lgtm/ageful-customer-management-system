@@ -1,12 +1,13 @@
 type Props = { status: string | null | undefined }
 
 const MAP: Record<string, { label: string; cls: string }> = {
-  pending:    { label: '未対応', cls: 'badge-pending' },
-  in_progress:{ label: '対応中', cls: 'badge-progress' },
-  completed:  { label: '完了',   cls: 'badge-done' },
-  unbilled:   { label: '未請求', cls: 'badge-pending' },
-  billed:     { label: '請求済', cls: 'badge-progress' },
-  paid:       { label: '入金済', cls: 'badge-done' },
+  // MaintenanceResponse status
+  '対応中': { label: '対応中', cls: 'badge-progress' },
+  '完了':   { label: '完了',   cls: 'badge-done' },
+  // AnnualRecord status
+  '未入金': { label: '未入金', cls: 'badge-pending' },
+  '請求済': { label: '請求済', cls: 'badge-progress' },
+  '入金済': { label: '入金済', cls: 'badge-done' },
 }
 
 export function StatusBadge({ status }: Props) {

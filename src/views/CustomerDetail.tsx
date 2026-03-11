@@ -1,104 +1,112 @@
-import { useState } from 'react'
-import type { CustomerDetail as Detail, Project } from '../types'
-import { StatusBadge } from '../components/StatusBadge'
+import { useRef, useState } from 'react'
+import type { CustomerDetailData, CustomerInput } from '../types'
+import type { ProjectInput } from '../lib/actions'
 import { Modal } from '../components/Modal'
-import { createProject, updateProject, type ProjectInput } from '../lib/actions'
-import { getCustomerDetail } from '../lib/data'
+import { createProject, updateCustomer, uploadAttachment, deleteAttachment } from '../lib/actions'
 
 type Props = {
-  detail: Detail
+  detail: CustomerDetailData
   onBack: () => void
-  onReload: (id: number) => void
+  onReload: () => void
+  onViewProject: (projectId: number) => void
 }
 
-const emptyProject: ProjectInput = {
-  customer_id: 0,
-  project_number: '',
-  project_name: '',
-  site_address: '',
-  key_number: '',
-  grid_id: '',
-  grid_certified_at: '',
-  fit_period: '',
-  fit_end_date: '',
-  power_supply_start_date: '',
-  generation_point_id: '',
-  customer_number: '',
-  handover_date: '',
-  abolition_date: '',
-  sales_company: '',
-  referrer: '',
-  sales_price: '',
-  reference_price: '',
-  land_cost: '',
-  amuras_member_no: '',
-  monitoring_system: '',
-  notes: '',
-  latitude: '',
-  longitude: '',
+const emptyProject: Omit<ProjectInput, 'customer_id'> = {
+  project_no: '', project_name: '', plant_name: '', site_postal_code: '', site_prefecture: '',
+  site_address: '', latitude: '', longitude: '',
+  panel_kw: '', panel_count: '', panel_maker: '', panel_model: '',
+  pcs_kw: '', pcs_count: '', pcs_maker: '', pcs_model: '',
+  grid_id: '', grid_certified_at: '', fit_period: '', power_supply_start_date: '',
+  customer_number: '', generation_point_id: '', meter_reading_day: '',
+  monitoring_system: '', monitoring_id: '', monitoring_user: '', monitoring_pw: '',
+  has_4g: false, key_number: '', local_association: '', old_owner: '',
+  sales_company: '', referrer: '', power_change_date: '', handover_date: '', sales_price: '',
+  reference_price: '', land_cost: '', amuras_member_no: '', notes: '',
 }
 
-export function CustomerDetail({ detail, onBack, onReload }: Props) {
-  const { customer, projects, recentMaintenance } = detail
-  const [projectModal, setProjectModal] = useState<'create' | 'edit' | null>(null)
-  const [editProject, setEditProject] = useState<Project | null>(null)
-  const [form, setForm] = useState<ProjectInput>(emptyProject)
+export function CustomerDetailView({ detail, onBack, onReload, onViewProject }: Props) {
+  const { customer, projects, attachments } = detail
+
+  const [editModal, setEditModal] = useState(false)
+  const [editForm, setEditForm] = useState<CustomerInput>({
+    name: customer.name,
+    company_name: customer.company_name ?? '',
+    is_corporate: customer.is_corporate,
+    email: customer.email ?? '',
+    phone: customer.phone ?? '',
+    postal_code: customer.postal_code ?? '',
+    address: customer.address ?? '',
+  })
+
+  const [projectModal, setProjectModal] = useState(false)
+  const [projectForm, setProjectForm] = useState<Omit<ProjectInput, 'customer_id'>>(emptyProject)
+
+  // ── PDF アップロード ──
+  const [uploadModal, setUploadModal] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadDesc, setUploadDesc] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  function openCreate() {
-    setForm({ ...emptyProject, customer_id: customer.id })
-    setEditProject(null)
-    setProjectModal('create')
-    setError('')
-  }
-
-  function openEdit(p: Project) {
-    setForm({
-      customer_id: customer.id,
-      project_number: p.project_number ?? '',
-      project_name: p.project_name,
-      site_address: p.site_address ?? '',
-      key_number: p.key_number ?? '',
-      grid_id: p.grid_id ?? '',
-      grid_certified_at: p.grid_certified_at ?? '',
-      fit_period: p.fit_period != null ? String(p.fit_period) : '',
-      fit_end_date: p.fit_end_date ?? '',
-      power_supply_start_date: p.power_supply_start_date ?? '',
-      generation_point_id: p.generation_point_id ?? '',
-      customer_number: p.customer_number ?? '',
-      handover_date: p.handover_date ?? '',
-      abolition_date: p.abolition_date ?? '',
-      sales_company: p.sales_company ?? '',
-      referrer: p.referrer ?? '',
-      sales_price: p.sales_price != null ? String(p.sales_price) : '',
-      reference_price: p.reference_price != null ? String(p.reference_price) : '',
-      land_cost: p.land_cost != null ? String(p.land_cost) : '',
-      amuras_member_no: p.amuras_member_no ?? '',
-      monitoring_system: p.monitoring_system ?? '',
-      notes: p.notes ?? '',
-      latitude: p.latitude != null ? String(p.latitude) : '',
-      longitude: p.longitude != null ? String(p.longitude) : '',
-    })
-    setEditProject(p)
-    setProjectModal('edit')
-    setError('')
-  }
-
-  async function handleSave() {
-    if (!form.project_name.trim()) { setError('案件名は必須です'); return }
+  async function handleSaveCustomer() {
+    if (!editForm.name.trim()) { setError('顧客名は必須です'); return }
     setSaving(true)
     try {
-      if (projectModal === 'create') await createProject(form)
-      else if (projectModal === 'edit' && editProject) await updateProject(editProject.id, form)
-      setProjectModal(null)
-      // 顧客詳細を再取得して表示を更新
-      onReload(customer.id)
+      await updateCustomer(customer.id, editForm)
+      setEditModal(false)
+      onReload()
+    } catch (e) { setError(String(e)) } finally { setSaving(false) }
+  }
+
+  async function handleSaveProject() {
+    if (!projectForm.project_name.trim()) { setError('案件名は必須です'); return }
+    setSaving(true)
+    try {
+      await createProject({ ...projectForm, customer_id: customer.id })
+      setProjectModal(false)
+      onReload()
+    } catch (e) { setError(String(e)) } finally { setSaving(false) }
+  }
+
+  // ── ファイル選択 ──────────────────────────────────────────
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setUploadFile(file)
+    setUploadErr('')
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0] ?? null
+    setUploadFile(file)
+    setUploadErr('')
+  }
+
+  async function handleUpload() {
+    if (!uploadFile) { setUploadErr('ファイルを選択してください'); return }
+    setUploading(true); setUploadErr('')
+    try {
+      await uploadAttachment(customer.id, uploadFile, uploadDesc)
+      setUploadModal(false)
+      setUploadFile(null)
+      setUploadDesc('')
+      onReload()
     } catch (e) {
-      setError(String(e))
+      setUploadErr(String(e))
     } finally {
-      setSaving(false)
+      setUploading(false)
     }
+  }
+
+  async function handleDeleteAttachment(id: number, fileUrl: string) {
+    if (!confirm('この添付ファイルを削除しますか？')) return
+    await deleteAttachment(id, fileUrl)
+    onReload()
   }
 
   return (
@@ -106,41 +114,56 @@ export function CustomerDetail({ detail, onBack, onReload }: Props) {
       <button className="back-btn" onClick={onBack}>← 顧客一覧に戻る</button>
 
       <div className="card">
-        <h3 className="section-title">顧客情報</h3>
+        <div className="card-header-row">
+          <h3 className="section-title" style={{ margin: 0 }}>顧客情報</h3>
+          <button className="btn btn-sub btn-sm" onClick={() => { setEditForm({
+            name: customer.name,
+            company_name: customer.company_name ?? '',
+            is_corporate: customer.is_corporate,
+            email: customer.email ?? '',
+            phone: customer.phone ?? '',
+            postal_code: customer.postal_code ?? '',
+            address: customer.address ?? '',
+          }); setError(''); setEditModal(true) }}>
+            編集
+          </button>
+        </div>
         <div className="info-grid">
-          <div className="info-field"><span>種別</span><b>{customer.type === 'corporate' ? '法人' : '個人'}</b></div>
+          <div className="info-field"><span>種別</span><b>{customer.is_corporate ? '法人' : '個人'}</b></div>
           {customer.company_name && <div className="info-field"><span>会社名</span><b>{customer.company_name}</b></div>}
-          <div className="info-field"><span>担当者</span><b>{customer.contact_name}</b></div>
+          <div className="info-field"><span>顧客名</span><b>{customer.name}</b></div>
           <div className="info-field"><span>電話</span><b>{customer.phone ?? '-'}</b></div>
           <div className="info-field"><span>メール</span><b>{customer.email ?? '-'}</b></div>
-          <div className="info-field"><span>住所</span><b>{customer.address ?? '-'}</b></div>
-          {customer.notes && <div className="info-field" style={{ gridColumn: '1/-1' }}><span>備考</span><b>{customer.notes}</b></div>}
+          <div className="info-field"><span>郵便番号</span><b>{customer.postal_code ?? '-'}</b></div>
+          <div className="info-field" style={{ gridColumn: '1/-1' }}><span>住所</span><b>{customer.address ?? '-'}</b></div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header-row">
           <h3 className="section-title" style={{ margin: 0 }}>案件一覧（{projects.length} 件）</h3>
-          <button className="btn btn-main btn-sm" onClick={openCreate}>＋ 案件を追加</button>
+          <button className="btn btn-main btn-sm" onClick={() => { setProjectForm(emptyProject); setError(''); setProjectModal(true) }}>
+            ＋ 案件を追加
+          </button>
         </div>
         {projects.length === 0 ? (
           <p className="empty-cell">案件がありません</p>
         ) : (
           <table>
             <thead>
-              <tr><th>案件名</th><th>案件番号</th><th>設置住所</th><th>パネル</th><th>PCS</th><th>操作</th></tr>
+              <tr><th>案件名</th><th>都道府県</th><th>FIT期間</th><th>委託先</th><th>保守開始日</th></tr>
             </thead>
             <tbody>
               {projects.map(p => (
-                <tr key={p.id}>
-                  <td><strong>{p.project_name}</strong></td>
-                  <td>{p.project_number ?? '-'}</td>
-                  <td>{p.site_address ?? '-'}</td>
-                  <td>{p.spec ? `${p.spec.panel_kw ?? '-'}kW / ${p.spec.panel_count ?? '-'}枚` : '-'}</td>
-                  <td>{p.spec ? `${p.spec.pcs_kw ?? '-'}kW / ${p.spec.pcs_count ?? '-'}台` : '-'}</td>
+                <tr key={p.id} className="clickable-row" onClick={() => onViewProject(p.id)}>
                   <td>
-                    <button className="btn-icon" title="編集" onClick={() => openEdit(p)}>✎</button>
+                    <strong>{p.project_name}</strong>
+                    {p.project_no && <div style={{ fontSize: 11, color: '#64748b' }}>{p.project_no}</div>}
                   </td>
+                  <td>{p.site_prefecture ?? '-'}</td>
+                  <td>{p.fit_period != null ? `${p.fit_period}年` : '-'}</td>
+                  <td>{p.subcontractor ?? '-'}</td>
+                  <td>{p.maintenance_start_date ?? '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -148,58 +171,172 @@ export function CustomerDetail({ detail, onBack, onReload }: Props) {
         )}
       </div>
 
+      {/* ── 添付ファイル ── */}
       <div className="card">
-        <h3 className="section-title">最近の保守記録</h3>
-        {recentMaintenance.length === 0 ? (
-          <p className="empty-cell">保守記録がありません</p>
+        <div className="card-header-row">
+          <h3 className="section-title" style={{ margin: 0 }}>
+            添付ファイル（{attachments.length} 件）
+          </h3>
+          <button className="btn btn-main btn-sm" onClick={() => { setUploadFile(null); setUploadDesc(''); setUploadErr(''); setUploadModal(true) }}>
+            ＋ ファイルを追加
+          </button>
+        </div>
+
+        {attachments.length === 0 ? (
+          <p className="empty-cell">添付ファイルがありません</p>
         ) : (
-          <table>
-            <thead>
-              <tr><th>案件</th><th>発生日</th><th>作業種別</th><th>対応内容</th><th>状態</th></tr>
-            </thead>
-            <tbody>
-              {recentMaintenance.map(m => (
-                <tr key={m.id}>
-                  <td>{m.project_name ?? '-'}</td>
-                  <td>{m.occurrence_date ?? '-'}</td>
-                  <td>{m.work_type ?? '-'}</td>
-                  <td>{m.response ?? '-'}</td>
-                  <td><StatusBadge status={m.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="attachment-list">
+            {attachments.map(a => (
+              <div key={a.id} className="attachment-item">
+                <span className="attachment-icon">
+                  {a.file_type === 'pdf' ? '📄' : a.file_type === 'image' ? '🖼' : '📎'}
+                </span>
+                <div className="attachment-info">
+                  <div className="attachment-name">{a.file_name}</div>
+                  {a.description && <div className="attachment-desc">{a.description}</div>}
+                  <div className="attachment-date">{a.uploaded_at.slice(0, 10)}</div>
+                </div>
+                <div className="attachment-actions">
+                  <a href={a.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-sub btn-sm">
+                    開く
+                  </a>
+                  <button className="btn-icon" title="削除" onClick={() => handleDeleteAttachment(a.id, a.file_url)}>
+                    🗑
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {(projectModal === 'create' || projectModal === 'edit') && (
-        <Modal
-          title={projectModal === 'create' ? '案件を新規登録' : '案件を編集'}
-          onClose={() => setProjectModal(null)}
-        >
+      {/* 顧客編集モーダル */}
+      {editModal && (
+        <Modal title="顧客情報を編集" onClose={() => setEditModal(false)}>
+          {error && <div className="form-error">{error}</div>}
+          <div className="form-grid">
+            <label className="form-label required">
+              顧客名
+              <input className="form-input" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+            </label>
+            <label className="form-label">
+              会社名（法人の場合）
+              <input className="form-input" value={editForm.company_name} onChange={e => setEditForm(f => ({ ...f, company_name: e.target.value, is_corporate: !!e.target.value }))} />
+            </label>
+            <label className="form-label">
+              電話番号
+              <input className="form-input" type="tel" value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} />
+            </label>
+            <label className="form-label">
+              メールアドレス
+              <input className="form-input" type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+            </label>
+            <label className="form-label">
+              郵便番号
+              <input className="form-input" value={editForm.postal_code} onChange={e => setEditForm(f => ({ ...f, postal_code: e.target.value }))} />
+            </label>
+            <label className="form-label" style={{ gridColumn: '1/-1' }}>
+              住所
+              <input className="form-input" value={editForm.address} onChange={e => setEditForm(f => ({ ...f, address: e.target.value }))} />
+            </label>
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn-sub" onClick={() => setEditModal(false)}>キャンセル</button>
+            <button className="btn btn-main" onClick={handleSaveCustomer} disabled={saving}>{saving ? '保存中...' : '保存する'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* 案件追加モーダル */}
+      {projectModal && (
+        <Modal title="案件を追加" onClose={() => setProjectModal(false)}>
           {error && <div className="form-error">{error}</div>}
           <div className="form-grid">
             <label className="form-label required" style={{ gridColumn: '1/-1' }}>
               案件名
-              <input className="form-input" value={form.project_name} onChange={e => setForm(f => ({ ...f, project_name: e.target.value }))} />
+              <input className="form-input" value={projectForm.project_name} onChange={e => setProjectForm(f => ({ ...f, project_name: e.target.value }))} />
             </label>
             <label className="form-label">
               案件番号
-              <input className="form-input" placeholder="PJ-2026-001" value={form.project_number} onChange={e => setForm(f => ({ ...f, project_number: e.target.value }))} />
+              <input className="form-input" value={projectForm.project_no} onChange={e => setProjectForm(f => ({ ...f, project_no: e.target.value }))} />
             </label>
             <label className="form-label">
-              キー番号
-              <input className="form-input" value={form.key_number} onChange={e => setForm(f => ({ ...f, key_number: e.target.value }))} />
+              都道府県
+              <input className="form-input" value={projectForm.site_prefecture} onChange={e => setProjectForm(f => ({ ...f, site_prefecture: e.target.value }))} />
             </label>
             <label className="form-label" style={{ gridColumn: '1/-1' }}>
               設置住所
-              <input className="form-input" value={form.site_address} onChange={e => setForm(f => ({ ...f, site_address: e.target.value }))} />
+              <input className="form-input" value={projectForm.site_address} onChange={e => setProjectForm(f => ({ ...f, site_address: e.target.value }))} />
+            </label>
+            <label className="form-label">
+              FIT期間（年）
+              <input className="form-input" type="number" value={projectForm.fit_period} onChange={e => setProjectForm(f => ({ ...f, fit_period: e.target.value }))} />
+            </label>
+            <label className="form-label">
+              引渡日
+              <input className="form-input" type="date" value={projectForm.handover_date} onChange={e => setProjectForm(f => ({ ...f, handover_date: e.target.value }))} />
             </label>
           </div>
           <div className="modal-footer">
-            <button className="btn btn-sub" onClick={() => setProjectModal(null)}>キャンセル</button>
-            <button className="btn btn-main" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '保存する'}
+            <button className="btn btn-sub" onClick={() => setProjectModal(false)}>キャンセル</button>
+            <button className="btn btn-main" onClick={handleSaveProject} disabled={saving}>{saving ? '保存中...' : '追加する'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ファイルアップロードモーダル */}
+      {uploadModal && (
+        <Modal title="ファイルを追加" onClose={() => setUploadModal(false)}>
+          {uploadErr && <div className="form-error">{uploadErr}</div>}
+
+          {/* ドロップゾーン */}
+          <div
+            className={`upload-dropzone ${uploadFile ? 'upload-dropzone--selected' : ''}`}
+            onDragOver={e => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            {uploadFile ? (
+              <>
+                <div className="upload-file-icon">
+                  {uploadFile.type.includes('pdf') ? '📄' : uploadFile.type.startsWith('image/') ? '🖼' : '📎'}
+                </div>
+                <div className="upload-file-name">{uploadFile.name}</div>
+                <div className="upload-file-size">{(uploadFile.size / 1024).toFixed(0)} KB</div>
+                <div className="upload-change-hint">クリックでファイルを変更</div>
+              </>
+            ) : (
+              <>
+                <div className="upload-drop-icon">📂</div>
+                <div className="upload-drop-text">クリックまたはドラッグ＆ドロップでファイルを選択</div>
+                <div className="upload-drop-hint">PDF・画像・Word・Excel など</div>
+              </>
+            )}
+          </div>
+
+          <div className="form-grid" style={{ marginTop: 16 }}>
+            <label className="form-label" style={{ gridColumn: '1/-1' }}>
+              説明（任意）
+              <input
+                className="form-input"
+                placeholder="例：保守契約書、完了証明書 など"
+                value={uploadDesc}
+                onChange={e => setUploadDesc(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn btn-sub" onClick={() => setUploadModal(false)}>キャンセル</button>
+            <button className="btn btn-main" onClick={handleUpload} disabled={uploading || !uploadFile}>
+              {uploading ? 'アップロード中...' : 'アップロード'}
             </button>
           </div>
         </Modal>
@@ -207,6 +344,3 @@ export function CustomerDetail({ detail, onBack, onReload }: Props) {
     </>
   )
 }
-
-// 顧客詳細の再取得を外部から呼べるよう型をエクスポート
-export type { getCustomerDetail }

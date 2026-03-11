@@ -4,14 +4,13 @@
 
 export type Customer = {
   id: number
-  type: 'individual' | 'corporate'
-  company_name: string | null
-  contact_name: string
+  name: string               // 個人名
+  company_name: string | null // 法人名（法人の場合）
+  is_corporate: boolean
   email: string | null
   phone: string | null
   postal_code: string | null
   address: string | null
-  notes: string | null
   created_at: string
   project_count?: number
 }
@@ -19,91 +18,127 @@ export type Customer = {
 export type Project = {
   id: number
   customer_id: number
-  project_number: string | null
+  project_no: string | null
   project_name: string
+  plant_name: string | null    // 発電所名（案件名とは別）
+  // 発電所住所
+  site_postal_code: string | null
+  site_prefecture: string | null
   site_address: string | null
-  key_number: string | null
-  // FIT・系統情報
+  latitude: number | null
+  longitude: number | null
+  // パネル情報
+  panel_kw: number | null
+  panel_count: number | null
+  panel_maker: string | null
+  panel_model: string | null
+  // PCS情報
+  pcs_kw: number | null
+  pcs_count: number | null
+  pcs_maker: string | null
+  pcs_model: string | null
+  // 経産・FIT
   grid_id: string | null
   grid_certified_at: string | null
   fit_period: number | null
-  fit_end_date: string | null
   power_supply_start_date: string | null
-  generation_point_id: string | null
   customer_number: string | null
-  // 日程
-  handover_date: string | null
-  abolition_date: string | null
-  // 販売情報
+  generation_point_id: string | null
+  meter_reading_day: string | null
+  // 監視情報
+  monitoring_system: string | null
+  monitoring_id: string | null
+  monitoring_user: string | null
+  monitoring_pw: string | null
+  has_4g: boolean | null
+  // その他
+  key_number: string | null
+  local_association: string | null
+  old_owner: string | null
   sales_company: string | null
   referrer: string | null
+  power_change_date: string | null  // 電力変更日
+  handover_date: string | null
   sales_price: number | null
   reference_price: number | null
   land_cost: number | null
-  // 保守管理
   amuras_member_no: string | null
-  monitoring_system: string | null
   notes: string | null
-  // 座標
-  latitude: number | null
-  longitude: number | null
   created_at: string
 }
 
-export type PowerPlantSpec = {
-  panel_kw: number | null
-  panel_count: number | null
-  panel_manufacturer: string | null
-  panel_model: string | null
-  pcs_kw: number | null
-  pcs_count: number | null
-  pcs_manufacturer: string | null
-  pcs_model: string | null
-}
-
-export type MaintenanceStatus = 'pending' | 'in_progress' | 'completed'
-
-export type MaintenanceLog = {
+export type Contract = {
   id: number
   project_id: number
-  inquiry_date: string | null
-  occurrence_date: string | null
-  work_type: string | null
-  target_area: string | null
-  situation: string | null
-  response: string | null
-  report: string | null
-  status: MaintenanceStatus
+  billing_method: string | null  // 請求書 / ROBOT
+  billing_due_day: string | null // 例: "12月1日"
+  billing_amount_ex: number | null
+  billing_amount_inc: number | null
+  annual_maintenance_ex: number | null
+  annual_maintenance_inc: number | null
+  land_cost_monthly: number | null
+  insurance_fee: number | null
+  other_fee: number | null
+  transfer_account: number | null
+  subcontractor: string | null   // 委託先
+  subcontract_fee_ex: number | null
+  subcontract_fee_inc: number | null
+  subcontract_billing_day: string | null
+  subcontract_start_date: string | null
+  maintenance_start_date: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type AnnualRecordStatus = '未入金' | '請求済' | '入金済'
+
+export type AnnualRecord = {
+  id: number
+  contract_id: number
+  year: number
+  billing_date: string | null   // 請求日
+  received_date: string | null  // 入金日
+  maintenance_record: string | null // 保守記録メモ
+  escort_record: string | null  // 駆付記録
+  status: AnnualRecordStatus
+}
+
+export type MaintenanceResponseStatus = '対応中' | '完了'
+
+export type MaintenanceResponse = {
+  id: number
+  response_no: string | null     // 管理番号（例: "25001"）
+  project_id: number
+  status: MaintenanceResponseStatus
+  inquiry_date: string | null    // 問合日
+  occurrence_date: string | null // 発生日
+  target_area: string | null     // 対象箇所
+  situation: string | null       // 状況
+  response_content: string | null // 対応
+  report: string | null          // 報告
   created_at: string
   // joined
   project_name?: string
   customer_name?: string
 }
 
-export type Contract = {
+export type PeriodicMaintenance = {
   id: number
   project_id: number
-  contract_type: string | null
-  business_owner: string | null
-  contractor: string | null
-  start_date: string | null
-  end_date: string | null
-  annual_maintenance_fee: number | null
-  communication_fee: number | null
+  record_date: string
+  work_type: string | null // 点検 / 除草 / 巡回 / その他
+  content: string | null
   created_at: string
 }
 
-export type InvoiceStatus = 'unbilled' | 'billed' | 'paid'
-
-export type Invoice = {
+export type Attachment = {
   id: number
-  contract_id: number
-  billing_period: string | null
-  issue_date: string | null
-  amount: number | null
-  status: InvoiceStatus
-  payment_due_date: string | null
-  paid_at: string | null
+  customer_id: number
+  file_name: string
+  file_url: string
+  file_type: string  // pdf / image / other
+  description: string | null
+  uploaded_at: string
 }
 
 // ──────────────────────────────────────────────────────────
@@ -113,35 +148,57 @@ export type Invoice = {
 export type DashboardStats = {
   totalCustomers: number
   totalProjects: number
-  pendingMaintenanceCount: number
-  unbilledInvoiceCount: number
-}
-
-export type BillingRow = {
-  contract_name: string
-  project_name: string
-  invoice: Invoice
-}
-
-export type CustomerDetail = {
-  customer: Customer
-  projects: (Project & { spec: PowerPlantSpec | null })[]
-  recentMaintenance: MaintenanceLog[]
+  activeMaintenanceCount: number   // 対応中の保守対応件数
+  pendingBillingCount: number      // 今月入金予定件数
 }
 
 export type ProjectRow = {
   id: number
   customer_id: number
-  project_number: string | null
+  project_no: string | null
   project_name: string
+  site_prefecture: string | null
   site_address: string | null
-  key_number: string | null
-  fit_end_date: string | null
+  fit_period: number | null
   handover_date: string | null
-  sales_company: string | null
+  monitoring_system: string | null
+  subcontractor: string | null       // 委託先（contractから）
+  maintenance_start_date: string | null
   created_at: string
   customer_name: string
   company_name: string | null
+}
+
+export type ProjectDetail = {
+  project: Project
+  customer: Customer
+  contract: Contract | null
+  annualRecords: AnnualRecord[]
+  maintenanceResponses: MaintenanceResponse[]
+  periodicMaintenance: PeriodicMaintenance[]
+}
+
+export type CustomerDetailData = {
+  customer: Customer
+  projects: ProjectRow[]
+  attachments: Attachment[]
+}
+
+export type BillingRow = {
+  project_id: number
+  project_name: string
+  customer_name: string
+  company_name: string | null
+  contract: Contract | null
+  currentYearRecord: AnnualRecord | null
+  currentYear: number
+}
+
+export type BillingDetail = {
+  project: Project
+  customer: Customer
+  contract: Contract
+  annualRecords: AnnualRecord[]
 }
 
 // ──────────────────────────────────────────────────────────
@@ -149,45 +206,58 @@ export type ProjectRow = {
 // ──────────────────────────────────────────────────────────
 
 export type CustomerInput = {
-  type: 'individual' | 'corporate'
+  name: string
   company_name: string
-  contact_name: string
+  is_corporate: boolean
   email: string
   phone: string
   postal_code: string
   address: string
-  notes: string
 }
 
-export type MaintenanceInput = {
+export type MaintenanceResponseInput = {
   project_id: number
+  response_no: string
   inquiry_date: string
   occurrence_date: string
-  work_type: string
   target_area: string
   situation: string
-  response: string
+  response_content: string
   report: string
 }
 
+export type PeriodicMaintenanceInput = {
+  project_id: number
+  record_date: string
+  work_type: string
+  content: string
+}
+
+export type AnnualRecordInput = {
+  contract_id: number
+  year: number
+  billing_date: string
+  received_date: string
+  maintenance_record: string
+  escort_record: string
+  status: AnnualRecordStatus
+}
+
 // ──────────────────────────────────────────────────────────
-// CSV import type
+// CSV import type (legacy format)
 // ──────────────────────────────────────────────────────────
 
 export type CsvImportRow = {
-  // 顧客情報（名寄せキー: customer_name）
   customer_name: string
   company_name: string
   email: string
   phone: string
   postal_code: string
   customer_address: string
-  // 案件基本
   project_name: string
   project_number: string
   key_number: string
   site_address: string
-  // FIT・系統
   grid_id: string
   grid_certified_at: string
   fit_period: string
@@ -195,23 +265,18 @@ export type CsvImportRow = {
   fit_end_date: string
   generation_point_id: string
   customer_number: string
-  // 日程
   handover_date: string
-  abolition_date: string
-  // 販売
+  power_change_date: string
   sales_company: string
   referrer: string
   sales_price: string
   reference_price: string
   land_cost: string
-  // 保守
   amuras_member_no: string
   monitoring_system: string
   notes: string
-  // 座標
   latitude: string
   longitude: string
-  // 発電スペック
   panel_kw: string
   panel_count: string
   panel_manufacturer: string
@@ -220,4 +285,29 @@ export type CsvImportRow = {
   pcs_count: string
   pcs_manufacturer: string
   pcs_model: string
+  // Extra project fields (populated by 全体 format only)
+  plant_name?: string          // 発電所名（col7）
+  site_postal_code?: string
+  meter_reading_day?: string
+  monitoring_id?: string
+  monitoring_pw?: string
+  has_4g_str?: string    // '有'/'可'/'要' → true, '無'/'ー' → false
+  local_association?: string
+  old_owner?: string
+  // Contract fields (populated by 全体 format only)
+  billing_method?: string
+  billing_due_day?: string     // 請求予定日（col54）
+  billing_amount_ex?: string
+  billing_amount_inc?: string
+  annual_maintenance_ex?: string
+  annual_maintenance_inc?: string
+  land_cost_monthly?: string   // 土地賃料（col59）
+  insurance_fee?: string       // 保険料（col60）
+  other_fee?: string           // その他（col61）
+  contract_notes?: string      // 契約備考（col63）
+  maintenance_start_date?: string
+  subcontractor?: string
+  subcontract_fee_ex?: string
+  subcontract_fee_inc?: string
+  subcontract_start_date?: string
 }

@@ -19,7 +19,7 @@ const CSV_COLUMNS: { key: keyof CsvImportRow; label: string; required?: boolean 
   { key: 'key_number',              label: 'カギNo' },
   { key: 'site_address',            label: '設置住所' },
   { key: 'handover_date',           label: '引渡日' },
-  { key: 'abolition_date',          label: '撤廃日' },
+  { key: 'power_change_date',       label: '電力変更日' },
   { key: 'grid_id',                 label: '系統ID' },
   { key: 'grid_certified_at',       label: '系統認定日' },
   { key: 'fit_period',              label: 'FIT期間_年' },
@@ -86,10 +86,21 @@ function parseFitNum(v: string): string {
 
 /** レガシー形式（2行ヘッダー）を検出する */
 function detectLegacyFormat(text: string): boolean {
-  const firstLine = text.split(/\r?\n/)[0].replace(/^\uFEFF/, '')
-  const cols = firstLine.split(',').map(c => c.trim().replace(/^"|"$/g, ''))
-  // col0="案件名" がレガシー形式の特徴
-  return cols[0] === '案件名'
+  const rows = parseCsvToRows(text.replace(/^\uFEFF/, ''))
+  const firstRow = rows[0] ?? []
+  return firstRow[0]?.trim() === '案件名'
+}
+
+/** 全体シート形式（エイジフル低圧一覧）を検出する */
+function detectZentaiFormat(text: string): boolean {
+  const rows = parseCsvToRows(text.replace(/^\uFEFF/, '')).slice(0, 30)
+  for (const cols of rows) {
+    const head = cols.map(c => c.trim())
+    if (head[0]?.startsWith('顧客メイン')) return true
+    // 列ヘッダー行: col0=案件No かつ col1=案件名 かつ col2=顧客名
+    if (head[0] === '案件No' && head[1] === '案件名' && head[2] === '顧客名') return true
+  }
+  return false
 }
 
 /**
@@ -107,29 +118,18 @@ function detectLegacyFormat(text: string): boolean {
  *   54-57=パネルkW/メーカー/パワコンkW/メーカー(col11が空の場合フォールバック)
  */
 function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] } {
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '')
-  if (lines.length < 3) return { rows: [], errors: ['データが不足しています（ヘッダー2行 + データ1行以上必要）'] }
+  const allRows = parseCsvToRows(text.replace(/^\uFEFF/, '')).filter(r => r.some(c => c.trim() !== ''))
+  if (allRows.length < 3) return { rows: [], errors: ['データが不足しています（ヘッダー2行 + データ1行以上必要）'] }
 
   const errors: string[] = []
   const rows: CsvImportRow[] = []
 
   // 先頭2行はヘッダー（スキップ）
-  for (let i = 2; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i])
+  for (let i = 2; i < allRows.length; i++) {
+    const cols = allRows[i]
 
     const projectName = cols[0]?.trim() ?? ''
     const customerName = cols[1]?.trim() ?? ''
-
-    // 空行スキップ
-    if (!projectName && !customerName) continue
-    if (!customerName) {
-      errors.push(`行${i + 1}（${projectName}）: 顧客名が空のためスキップ`)
-      continue
-    }
-    if (!projectName) {
-      errors.push(`行${i + 1}（${customerName}）: 案件名が空のためスキップ`)
-      continue
-    }
 
     // 座標パース
     const { lat, lng } = parseCoords(cols[10]?.trim() ?? '')
@@ -176,7 +176,6 @@ function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] 
       generation_point_id: cols[24]?.trim() ?? '',
       customer_number: cols[23]?.trim() ?? '',
       handover_date: cols[34]?.trim() ?? '',
-      abolition_date: '',
       sales_company: cols[31]?.trim() ?? '',
       referrer: cols[32]?.trim() ?? '',
       sales_price: cleanNumStr(cols[36]?.trim() ?? ''),
@@ -185,6 +184,7 @@ function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] 
       amuras_member_no: cols[46]?.trim() ?? '',
       monitoring_system: cols[25]?.trim() ?? '',
       notes: cols[45]?.trim() ?? '',
+      power_change_date: '',
       latitude: lat,
       longitude: lng,
       panel_kw: panelKw,
@@ -203,37 +203,126 @@ function parseLegacyCsv(text: string): { rows: CsvImportRow[]; errors: string[] 
   return { rows, errors }
 }
 
-// ── テンプレート形式パーサー ───────────────────────────────────────────────────
+// ── 全体シート形式パーサー ────────────────────────────────────────────────────
+//
+// 列マッピング（行インデックス11以降がデータ）:
+//   0=案件No, 1=案件名, 2=顧客名, 3=E-mail, 4=電話番号, 5=郵便番号(顧客), 6=住所(顧客)
+//   7=発電所名, 8=郵便番号(発電所), 9=都道府県, 10=住所(市区町村以降), 11=座標
+//   12=パネルkW, 13=パネル説明, 14=パネルメーカー, 15=パネル型番
+//   16=PCS kW, 17=PCS説明, 18=PCSメーカー, 19=PCS型番
+//   20=経産ID, 21=経産認定日, 22=FIT, 23=需給開始日, 24=お客さま番号
+//   25=受電地点特定番号, 26=検針日, 27=遠隔監視, 28=ID, 29=PW, 30=4G対応
+//   31=備考, 32=カギNo, 33=自治会, 34=旧所有者, 35=販売会社, 36=紹介者
+//   37=電力変更日, 38=引渡日, 39=販売価格（税込）, 40=土地代
+//   49=アプラス会員番号
+//   53=請求方法, 55=請求金額（税別）, 56=請求金額（税込）
+//   57=年間保守料（税別）, 58=年間保守料（税込）
+//   70=保守開始日, 71=保守委託先, 72=委託料（税別）, 73=委託料（税込）, 74=委託開始日
 
-function parseCsv(text: string): { rows: CsvImportRow[]; errors: string[] } {
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '')
-  if (lines.length < 2) return { rows: [], errors: ['データが空です（ヘッダー行 + 1行以上必要）'] }
+function parseZentaiCsv(text: string): { rows: CsvImportRow[]; errors: string[] } {
+  const allRows = parseCsvToRows(text.replace(/^\uFEFF/, ''))
 
-  // BOM除去
-  const headerLine = lines[0].replace(/^\uFEFF/, '')
-  const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+  // 「案件No」「案件名」「顧客名」が並ぶ列ヘッダー行を探し、その次からデータ
+  let headerRowIndex = -1
+  for (let i = 0; i < Math.min(allRows.length, 30); i++) {
+    const head = allRows[i].map(c => c.trim())
+    if (head[0] === '案件No' && head[1] === '案件名' && head[2] === '顧客名') {
+      headerRowIndex = i
+      break
+    }
+    // 最初の5列に「案件No」か「案件名」か「顧客名」が含まれていればヘッダー行
+    if (head.slice(0, 5).some(c => c === '案件No' || c === '案件名' || c === '顧客名')) {
+      headerRowIndex = i
+      break
+    }
+  }
+
+  const startIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 11
+  const dataRows = allRows.slice(startIndex).filter(r => r.some(c => c.trim() !== ''))
+  if (dataRows.length === 0) return { rows: [], errors: ['データ行がありません（ヘッダー行スキップ後）'] }
 
   const errors: string[] = []
   const rows: CsvImportRow[] = []
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = splitCsvLine(lines[i])
-    const obj: Partial<CsvImportRow> = {}
+  for (let i = 0; i < dataRows.length; i++) {
+    const cols = dataRows[i]
 
-    headers.forEach((h, idx) => {
-      const key = LABEL_TO_KEY[h]
-      if (key) obj[key] = (values[idx] ?? '').trim()
-    })
+    const projectName = cols[1]?.trim() ?? ''
+    const customerName = cols[2]?.trim() ?? ''
 
-    const row = obj as CsvImportRow
-    // 必須項目チェック
-    if (!row.customer_name) {
-      errors.push(`行${i + 1}: 顧客名が空です（スキップ）`)
-      continue
-    }
-    if (!row.project_name) {
-      errors.push(`行${i + 1}（${row.customer_name}）: 案件名が空です（スキップ）`)
-      continue
+    // 座標パース
+    const { lat, lng } = parseCoords(cols[11]?.trim() ?? '')
+
+    // 発電所住所 = 都道府県 + 市区町村以降
+    const prefecture = cols[9]?.trim() ?? ''
+    const cityStreet = cols[10]?.trim() ?? ''
+    const siteAddress = [prefecture, cityStreet].filter(Boolean).join('')
+
+    const row: CsvImportRow = {
+      customer_name: customerName,
+      company_name: isCorporateName(customerName) ? customerName : '',
+      email: cols[3]?.trim() ?? '',
+      phone: cols[4]?.trim() ?? '',
+      postal_code: cols[5]?.trim() ?? '',
+      customer_address: cols[6]?.trim() ?? '',
+      project_name: projectName,
+      project_number: cols[0]?.trim() ?? '',
+      plant_name: cols[7]?.trim() ?? '',
+      key_number: cols[32]?.trim() ?? '',
+      site_address: siteAddress,
+      grid_id: cols[20]?.trim() ?? '',
+      grid_certified_at: cols[21]?.trim() ?? '',
+      fit_period: parseFitNum(cols[22]?.trim() ?? ''),
+      power_supply_start_date: cols[23]?.trim() ?? '',
+      fit_end_date: '',
+      generation_point_id: cols[25]?.trim() ?? '',
+      customer_number: cols[24]?.trim() ?? '',
+      handover_date: cols[38]?.trim() ?? '',
+      power_change_date: cols[37]?.trim() ?? '',
+      sales_company: cols[35]?.trim() ?? '',
+      referrer: cols[36]?.trim() ?? '',
+      sales_price: cleanNumStr(cols[39]?.trim() ?? ''),
+      reference_price: cleanNumStr(cols[41]?.trim() ?? ''),
+      land_cost: cleanNumStr(cols[40]?.trim() ?? ''),
+      amuras_member_no: cols[49]?.trim() ?? '',
+      monitoring_system: cols[27]?.trim() ?? '',
+      // col31=備考, col76=（案件の）備考 → 両方あれば改行で連結
+      notes: [cols[31]?.trim(), cols[76]?.trim()].filter(Boolean).join('\n'),
+      latitude: lat,
+      longitude: lng,
+      panel_kw: cols[12]?.trim() ?? '',
+      panel_count: parsePanelCount(cols[13]?.trim() ?? ''),
+      panel_manufacturer: cols[14]?.trim() ?? '',
+      panel_model: cols[15]?.trim() ?? '',
+      pcs_kw: cols[16]?.trim() ?? '',
+      pcs_count: parsePcsCount(cols[17]?.trim() ?? ''),
+      pcs_manufacturer: cols[18]?.trim() ?? '',
+      pcs_model: cols[19]?.trim() ?? '',
+      // 追加フィールド（案件詳細）
+      site_postal_code: cols[8]?.trim() ?? '',
+      meter_reading_day: cols[26]?.trim() ?? '',
+      monitoring_id: cols[28]?.trim() ?? '',
+      monitoring_pw: cols[29]?.trim() ?? '',
+      has_4g_str: cols[30]?.trim() ?? '',
+      local_association: cols[33]?.trim() ?? '',
+      old_owner: cols[34]?.trim() ?? '',
+      // 契約フィールド
+      billing_method: cols[53]?.trim() ?? '',
+      billing_due_day: cols[54]?.trim() ?? '',
+      billing_amount_ex: cleanNumStr(cols[55]?.trim() ?? ''),
+      billing_amount_inc: cleanNumStr(cols[56]?.trim() ?? ''),
+      annual_maintenance_ex: cleanNumStr(cols[57]?.trim() ?? ''),
+      annual_maintenance_inc: cleanNumStr(cols[58]?.trim() ?? ''),
+      land_cost_monthly: cleanNumStr(cols[59]?.trim() ?? ''),
+      insurance_fee: cleanNumStr(cols[60]?.trim() ?? ''),
+      other_fee: cleanNumStr(cols[61]?.trim() ?? ''),
+      // col63=契約備考, col75=保守の備考 → 両方あれば改行で連結
+      contract_notes: [cols[63]?.trim(), cols[75]?.trim()].filter(Boolean).join('\n'),
+      maintenance_start_date: cols[70]?.trim() ?? '',
+      subcontractor: cols[71]?.trim() ?? '',
+      subcontract_fee_ex: cleanNumStr(cols[72]?.trim() ?? ''),
+      subcontract_fee_inc: cleanNumStr(cols[73]?.trim() ?? ''),
+      subcontract_start_date: cols[74]?.trim() ?? '',
     }
 
     rows.push(row)
@@ -242,22 +331,68 @@ function parseCsv(text: string): { rows: CsvImportRow[]; errors: string[] } {
   return { rows, errors }
 }
 
-function splitCsvLine(line: string): string[] {
-  const result: string[] = []
+// ── テンプレート形式パーサー ───────────────────────────────────────────────────
+
+function parseCsv(text: string): { rows: CsvImportRow[]; errors: string[] } {
+  const allRows = parseCsvToRows(text.replace(/^\uFEFF/, '')).filter(r => r.some(c => c.trim() !== ''))
+  if (allRows.length < 2) return { rows: [], errors: ['データが空です（ヘッダー行 + 1行以上必要）'] }
+
+  const headers = allRows[0].map(h => h.trim())
+  const errors: string[] = []
+  const rows: CsvImportRow[] = []
+
+  for (let i = 1; i < allRows.length; i++) {
+    const values = allRows[i]
+    const obj: Partial<CsvImportRow> = {}
+
+    headers.forEach((h, idx) => {
+      const key = LABEL_TO_KEY[h]
+      if (key) obj[key] = (values[idx] ?? '').trim()
+    })
+
+    const row = obj as CsvImportRow
+    rows.push(row)
+  }
+
+  return { rows, errors }
+}
+
+/**
+ * CSV テキスト全体を一括パースし、行×列の2D配列を返す。
+ * Excel の「セル内改行」（Shift+Enter でクォート囲みになる）を正しく処理する。
+ */
+function parseCsvToRows(text: string): string[][] {
+  const result: string[][] = []
+  let row: string[] = []
   let cur = ''
   let inQuote = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+
     if (ch === '"') {
-      if (inQuote && line[i + 1] === '"') { cur += '"'; i++ }
+      if (inQuote && text[i + 1] === '"') { cur += '"'; i++ }
       else inQuote = !inQuote
     } else if (ch === ',' && !inQuote) {
-      result.push(cur); cur = ''
+      row.push(cur); cur = ''
+    } else if (ch === '\r' && !inQuote) {
+      if (text[i + 1] === '\n') i++ // \r\n → skip \r
+      row.push(cur); cur = ''
+      result.push(row); row = []
+    } else if (ch === '\n' && !inQuote) {
+      row.push(cur); cur = ''
+      result.push(row); row = []
     } else {
       cur += ch
     }
   }
-  result.push(cur)
+
+  // 末尾の行
+  if (cur || row.length > 0) {
+    row.push(cur)
+    result.push(row)
+  }
+
   return result
 }
 
@@ -289,12 +424,48 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 
+// ── エンコーディング自動検出（UTF-8 → Shift-JIS フォールバック）───────────────
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = reject
+    reader.onload = ev => {
+      const buf = ev.target?.result as ArrayBuffer
+      // UTF-8 BOM付きはそのまま
+      const bytes = new Uint8Array(buf)
+      if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+        resolve(new TextDecoder('utf-8').decode(buf))
+        return
+      }
+      // UTF-8 (fatal) で試みる
+      try {
+        resolve(new TextDecoder('utf-8', { fatal: true }).decode(buf))
+      } catch {
+        // Shift-JIS にフォールバック
+        try {
+          resolve(new TextDecoder('shift-jis').decode(buf))
+        } catch (e) {
+          reject(e)
+        }
+      }
+    }
+    reader.readAsArrayBuffer(file)
+  })
+}
+
 type ImportState = 'idle' | 'preview' | 'importing' | 'done'
 
-function parseAuto(text: string): { rows: CsvImportRow[]; errors: string[]; isLegacy: boolean } {
+type FormatType = 'template' | 'legacy' | 'zentai'
+
+function parseAuto(text: string): { rows: CsvImportRow[]; errors: string[]; isLegacy: boolean; format: FormatType } {
+  if (detectZentaiFormat(text)) {
+    const result = parseZentaiCsv(text)
+    return { ...result, isLegacy: false, format: 'zentai' }
+  }
   const isLegacy = detectLegacyFormat(text)
   const result = isLegacy ? parseLegacyCsv(text) : parseCsv(text)
-  return { ...result, isLegacy }
+  return { ...result, isLegacy, format: isLegacy ? 'legacy' : 'template' }
 }
 
 export function CsvImport({ onReload }: Props) {
@@ -303,21 +474,25 @@ export function CsvImport({ onReload }: Props) {
   const [rows, setRows] = useState<CsvImportRow[]>([])
   const [parseErrors, setParseErrors] = useState<string[]>([])
   const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
-  const [isLegacyFormat, setIsLegacyFormat] = useState(false)
+  const [csvFormat, setCsvFormat] = useState<FormatType>('template')
+
+  function processFile(file: File) {
+    readFileAsText(file).then(text => {
+      const { rows: parsed, errors, format } = parseAuto(text)
+      setRows(parsed)
+      setParseErrors(errors)
+      setCsvFormat(format)
+      setState('preview')
+    }).catch(err => {
+      setParseErrors([`ファイルの読み込みに失敗しました: ${String(err)}`])
+      setState('preview')
+    })
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const text = ev.target?.result as string
-      const { rows: parsed, errors, isLegacy } = parseAuto(text)
-      setRows(parsed)
-      setParseErrors(errors)
-      setIsLegacyFormat(isLegacy)
-      setState('preview')
-    }
-    reader.readAsText(file, 'UTF-8')
+    processFile(file)
     // reset input so same file can be re-selected
     e.target.value = ''
   }
@@ -335,6 +510,7 @@ export function CsvImport({ onReload }: Props) {
     setRows([])
     setParseErrors([])
     setImportResult(null)
+    setCsvFormat('template')
     setState('idle')
   }
 
@@ -361,16 +537,7 @@ export function CsvImport({ onReload }: Props) {
             e.preventDefault()
             const file = e.dataTransfer.files[0]
             if (!file) return
-            const reader = new FileReader()
-            reader.onload = ev => {
-              const text = ev.target?.result as string
-              const { rows: parsed, errors, isLegacy } = parseAuto(text)
-              setRows(parsed)
-              setParseErrors(errors)
-              setIsLegacyFormat(isLegacy)
-              setState('preview')
-            }
-            reader.readAsText(file, 'UTF-8')
+            processFile(file)
           }}
         >
           <div style={{ fontSize: 40, marginBottom: 8 }}>📂</div>
@@ -396,10 +563,10 @@ export function CsvImport({ onReload }: Props) {
                 {parseErrors.length > 0 && <span style={{ color: '#ea580c', marginLeft: 8 }}>（{parseErrors.length}件スキップ）</span>}
                 <span style={{
                   marginLeft: 10, fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
-                  background: isLegacyFormat ? '#fef3c7' : '#dbeafe',
-                  color: isLegacyFormat ? '#92400e' : '#1e40af',
+                  background: csvFormat === 'zentai' ? '#dcfce7' : csvFormat === 'legacy' ? '#fef3c7' : '#dbeafe',
+                  color: csvFormat === 'zentai' ? '#166534' : csvFormat === 'legacy' ? '#92400e' : '#1e40af',
                 }}>
-                  {isLegacyFormat ? '既存データ形式' : 'テンプレート形式'}
+                  {csvFormat === 'zentai' ? '全体シート形式' : csvFormat === 'legacy' ? '既存データ形式' : 'テンプレート形式'}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -418,7 +585,7 @@ export function CsvImport({ onReload }: Props) {
                     <th>顧客名</th>
                     <th>案件名</th>
                     <th>設置住所</th>
-                    <th>{isLegacyFormat ? '需給開始日' : 'FIT満了日'}</th>
+                    <th>{csvFormat === 'template' ? 'FIT満了日' : '需給開始日'}</th>
                     <th>販売価格</th>
                     <th>パネルkW</th>
                   </tr>
@@ -430,7 +597,7 @@ export function CsvImport({ onReload }: Props) {
                       <td>{row.customer_name}{row.company_name && <><br /><span style={{ fontSize: 11, color: '#64748b' }}>{row.company_name}</span></>}</td>
                       <td><strong>{row.project_name}</strong></td>
                       <td>{row.site_address || '-'}</td>
-                      <td>{isLegacyFormat ? (row.power_supply_start_date || '-') : (row.fit_end_date || '-')}</td>
+                      <td>{csvFormat === 'template' ? (row.fit_end_date || '-') : (row.power_supply_start_date || '-')}</td>
                       <td>{row.sales_price ? `¥${Number(row.sales_price.replace(/,/g, '')).toLocaleString()}` : '-'}</td>
                       <td>{row.panel_kw ? `${row.panel_kw} kW` : '-'}</td>
                     </tr>
